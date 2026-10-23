@@ -1,0 +1,12 @@
+{
+  "name": "openclaw-exec-guard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Tiered shell-command gate for OpenClaw: block catastrophes, auto-run read-only, ask the owner for anything that writes.",
+  "scripts": { "test": "node --test test/" },
+  "openclaw": {
+    "extensions": ["./index.js"],
+    "compat": { "pluginApi": ">=2026.3.24-beta.2", "minGatewayVersion": "2026.3.24-beta.2" }
+  }
+}

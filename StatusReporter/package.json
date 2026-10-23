@@ -1,0 +1,11 @@
+{
+  "name": "openclaw-status-reporter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Reports agent runs and tool calls to the local AI status hub (ESP32 display).",
+  "openclaw": {
+    "extensions": ["./index.js"],
+    "compat": { "pluginApi": ">=2026.3.24-beta.2", "minGatewayVersion": "2026.3.24-beta.2" }
+  }
+}

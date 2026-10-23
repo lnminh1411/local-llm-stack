@@ -1,0 +1,12 @@
+{
+  "name": "openclaw-content-guard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Discord-only content guardrails for an uncensored local model.",
+  "scripts": { "test": "node --test test/" },
+  "openclaw": {
+    "extensions": ["./index.js"],
+    "compat": { "pluginApi": ">=2026.3.24-beta.2", "minGatewayVersion": "2026.3.24-beta.2" }
+  }
+}

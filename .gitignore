@@ -1,0 +1,21 @@
+# Open WebUI: 3 GB of venv, database, uploads, password env file and logs. Local only.
+WebUI/
+
+# DeepSeek Harness venv for the Bridge (recreate with `pip install deepseek-harness-sdk`, see README)
+Bridge/harness/
+
+# Old Ollama/Gemma bridge, kept locally for reference; contains a WebUI secret key
+Bridge/legacy/
+
+# Secrets and local state
+.env
+*.env
+*.key
+.webui_secret_key
+openclaw.json
+
+# Python / Node noise
+__pycache__/
+*.pyc
+node_modules/
+*.log

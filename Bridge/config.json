@@ -1,0 +1,17 @@
+{
+  "_comment": "Local Agent Bridge settings. Anything omitted falls back to the defaults in localagent.py.",
+  "base_url": "http://127.0.0.1:8080",
+  "model": "occamy-1.0-fit-quality",
+  "default_ctx": 131072,
+  "heavy_ctx": 262144,
+  "heavy_idle_minutes": 10,
+  "launcher": "F:\\!PC Scripts\\Start-LocalAI.ps1",
+  "max_tokens": 4096,
+  "temperature": 0.4,
+  "top_p": 0.9,
+  "max_steps": 25,
+  "extra_body": {
+    "dry_multiplier": 0.8
+  },
+  "presence_penalty": 0.3
+}

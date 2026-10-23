@@ -1,0 +1,25 @@
+{
+  "id": "exec-guard",
+  "name": "Exec Guard",
+  "description": "Tiered gate for shell commands: double-confirm catastrophes, auto-run read-only, ask the owner (Discord buttons) for anything that writes.",
+  "activation": { "onStartup": true },
+  "contracts": { "trustedToolPolicies": ["exec-guard-gate"] },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "reviewer": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "baseUrl": { "type": "string" },
+          "model": { "type": "string" },
+          "timeoutMs": { "type": "integer", "minimum": 1000, "maximum": 300000 }
+        }
+      },
+      "approvalTimeoutMs": { "type": "integer", "minimum": 10000, "maximum": 600000 },
+      "dataDir": { "type": "string" }
+    }
+  }
+}

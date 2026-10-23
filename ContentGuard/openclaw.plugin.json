@@ -1,0 +1,29 @@
+{
+  "id": "content-guard",
+  "name": "Content Guard",
+  "description": "Discord-only content guardrails (18+, slurs, hate, harassment, self-harm, gore) in front of an uncensored local model.",
+  "activation": { "onStartup": true },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": { "type": "boolean" },
+      "mode": { "type": "string", "enum": ["always", "triggered"] },
+      "ownerExempt": { "type": "boolean" },
+      "blockCategories": {
+        "type": "array",
+        "items": { "type": "string", "enum": ["sexual_explicit", "sexual_minors", "hate_slur", "hate_discrimination", "harassment", "self_harm", "graphic_violence"] }
+      },
+      "reviewer": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "baseUrl": { "type": "string" },
+          "model": { "type": "string" },
+          "timeoutMs": { "type": "integer", "minimum": 1000, "maximum": 300000 }
+        }
+      },
+      "dataDir": { "type": "string" }
+    }
+  }
+}

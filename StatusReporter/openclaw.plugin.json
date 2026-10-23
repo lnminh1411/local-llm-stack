@@ -1,0 +1,7 @@
+{
+  "id": "status-reporter",
+  "name": "Status Reporter",
+  "description": "Reports agent runs and tool calls to the local AI status hub (wake proxy /_gate/event).",
+  "activation": { "onStartup": true },
+  "configSchema": { "type": "object", "additionalProperties": false, "properties": {} }
+}
