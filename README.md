@@ -8,12 +8,13 @@ Companion project: **[ESP32-PC-Control-System](https://github.com/lnminh1411/ESP
 
 | Folder | What it is |
 |---|---|
-| `Launcher/` | Snapshot of the stack's start-up scripts (the live copies run from `F:\!PC Scripts`): `Start-LocalAI.ps1` (llama-server flags, E-core pinning, proxy, gateway), `llama-wake.py` (wake-on-request proxy, idle unload, keep-awake while loaded), `ai_hub.py` (live status hub), `register-watchdog.ps1` + `Start-LocalAI-proxy-hidden.vbs` (scheduled task that restarts a dead proxy). |
+| `Launcher/` | Snapshot of the stack's start-up scripts (the live copies run from `F:\!PC Scripts`): `Start-LocalAI.ps1` (llama-server flags, E-core pinning, proxy, gateway), `llama-wake.py` (wake-on-request proxy, idle unload, keep-awake while loaded), `ai_hub.py` (live status hub), `LocalAI-Config.ps1` (config.env reader), `Register-Tasks.ps1` (logon-start and watchdog scheduled tasks, native PowerShell, no VBScript). |
 | `Bridge/` | Local Agent Bridge: `localagent.py` (the `la` CLI: `ask`, `run`, `status`, `heavy`, `jobs`, `wait`, `cancel`), `harness_worker.py` (runs a `run` job inside DeepSeek Harness), `SKILL.md` (the skill installed for Claude Code and Antigravity), `sync.py` (installs it). |
 | `ExecGuard/` | OpenClaw plugin: classifies every shell command. Read-only runs, writes ask the owner, dangerous and secret-touching commands need a red confirmation, catastrophic ones need two. Unknown commands are reviewed by the local model. 112 tests. |
 | `ContentGuard/` | OpenClaw plugin, Discord only: blocks 18+, slurs, hate, harassment, self-harm and gore, inbound and outbound, for an uncensored model. |
 | `StatusReporter/` | OpenClaw plugin: reports agent runs and tool calls to the status hub. Observer only. |
 | `shared/` | `hub.js`, the fire-and-forget reporter the plugins use. |
+| `config.env.example` | The one config file: folders, model files, GPU UUID, E-core mask, ports, context, idle time. Copy to `config.env` (git-ignored). Read by the launcher, the Bridge and the OpenClaw plugins. |
 | `StatusHub.md` | The status feed: endpoints, every key, state codes, how to wire it to the ESP32. |
 | `Project_Note.md` | Working notes: decisions, measurements, traps. |
 
@@ -31,10 +32,10 @@ Not in the repo (git-ignored): `WebUI/` (Open WebUI install, database, password 
 
 ## Setup (this PC)
 
-Everything is Windows and path-specific; treat it as a reference build, not a package.
+Windows only. Every machine-specific value (paths, GPU UUID, core mask, ports, model files) lives in `config.env`; treat the repo as a reference build, not a package.
 
-1. Models in `C:\ModelCache` (Occamy GGUF + projector); `llama-server.exe` is taken from Ollama's `lib\ollama` folder.
-2. Copy `Launcher/*` to a scripts folder, set `$GpuUuid` in `Start-LocalAI.ps1` (`nvidia-smi -L`), run `Start-LocalAI.ps1`, then `register-watchdog.ps1` once.
+1. `copy config.env.example config.env`, edit it (`nvidia-smi -L` gives `GPU_UUID`; `MODEL_DIRS` is where the Occamy GGUF + projector live), then `setx LOCALAI_CONFIG "<repo>\config.env"`. `llama-server.exe` is taken from Ollama's `lib\ollama` folder.
+2. Copy `Launcher/*` to `SCRIPTS_DIR`, run `Start-LocalAI.ps1`, then `Register-Tasks.ps1` once. The tasks run `conhost.exe --headless powershell.exe ...`, so nothing ever opens a window (Task Scheduler's Last Run Result always reads 0 that way; check the logs).
 3. OpenClaw: add `ExecGuard`, `ContentGuard`, `StatusReporter` to `plugins.load.paths` in `~/.openclaw/openclaw.json`. Non-bundled plugins that read conversations need `plugins.entries.<id>.hooks.allowConversationAccess: true` (without it OpenClaw 2026.7 silently blocks the hook). Restart the gateway.
 4. Bridge: `python -m venv Bridge/harness/venv`, `Bridge/harness/venv/Scripts/pip install deepseek-harness-sdk`, then `python Bridge/sync.py` to install the `local-agent` skill for Claude Code and Antigravity. Use it as `python ~/.local-agent/la.py run "task" --cwd <dir>`.
 5. Tests: `node --test "ExecGuard/test/*.test.js"` and `node --test "ContentGuard/test/*.js"`.

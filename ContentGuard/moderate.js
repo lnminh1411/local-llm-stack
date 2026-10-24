@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { proxyBase } from "../shared/config.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -118,7 +119,7 @@ const SCHEMA = {
 
 export async function classify(text, direction, cfg = {}) {
   const r = cfg.reviewer || {};
-  const base = (r.baseUrl || "http://127.0.0.1:8080/v1").replace(/\/$/, "");
+  const base = (r.baseUrl || `${proxyBase()}/v1`).replace(/\/$/, "");
   try {
     const res = await fetch(`${base}/chat/completions`, {
       method: "POST",

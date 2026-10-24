@@ -1,4 +1,6 @@
 // AI reviewer: asks the local model whether a command is read-only. It can only ever say "read_only" or hand the command to the owner.
+import { proxyBase } from "../shared/config.js";
+
 const SYSTEM = `You classify one Windows PowerShell / shell command for a safety gate. Reply with JSON only.
 verdict:
 - "read_only": the command only reads or displays information. It creates, changes, deletes, moves, downloads, installs, starts, stops or sends nothing, and writes no file (no redirection, no output files).
@@ -19,7 +21,7 @@ const SCHEMA = {
 export async function review(command, cfg = {}) {
   const r = cfg.reviewer || {};
   if (r.enabled === false) return { verdict: "unavailable", reason: "reviewer disabled" };
-  const base = (r.baseUrl || "http://127.0.0.1:8080/v1").replace(/\/$/, "");
+  const base = (r.baseUrl || `${proxyBase()}/v1`).replace(/\/$/, "");
   try {
     const res = await fetch(`${base}/chat/completions`, {
       method: "POST",

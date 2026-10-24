@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Local Agent Bridge: lets a cloud agent (Claude Code, Antigravity) hand work to the local model.
 
-The local model is Swift 1.5 Qwen3.8 27B (dense, IQ3_S) served by llama-server on 127.0.0.1:8080 (see
-F:\\!PC Scripts\\Start-LocalAI.ps1). The same server answers the OpenClaw Discord bot.
+The local model is served by llama-server behind the wake proxy; settings come from config.env.
+The same server answers the OpenClaw Discord bot.
 
 Subcommands
   ask     one-shot question; files / stdin are inlined as context. No tools.
@@ -44,6 +44,10 @@ if sys.platform == "win32":
             pass
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+import localai_config as LC
+
 STATE = os.path.join(os.path.expanduser("~"), ".local-agent")
 JOBS = os.path.join(STATE, "jobs")
 LOCK = os.path.join(STATE, "gpu.lock")
@@ -51,12 +55,12 @@ HEAVY = os.path.join(STATE, "heavy.json")
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 CFG = {
-    "base_url": "http://127.0.0.1:8080",
-    "model": "qwen3.6-35b-a3b-apex",
-    "default_ctx": 131072,
-    "heavy_ctx": 262144,
+    "base_url": LC.base_url(),
+    "model": LC.get("MODEL_ALIAS", "occamy-1.0-fit-quality"),
+    "default_ctx": int(LC.get("CONTEXT", "131072")),
+    "heavy_ctx": int(LC.get("HEAVY_CONTEXT", "262144")),
     "heavy_idle_minutes": 10,
-    "launcher": r"F:\!PC Scripts\Start-LocalAI.ps1",
+    "launcher": os.path.join(LC.get("SCRIPTS_DIR", ""), "Start-LocalAI.ps1") if LC.get("SCRIPTS_DIR") else "",
     "max_tokens": 4096,
     "temperature": 0.4,
     "top_p": 0.9,
@@ -215,14 +219,10 @@ def count_tokens(text):
 
 
 def launcher_path():
-    p = CFG["launcher"]
-    if os.path.exists(p):
+    p = CFG.get("launcher", "")
+    if p and os.path.exists(p):
         return p
-    for d in "CDEFGHIJKLMNOPQRSTUVWXYZ":
-        cand = "{}:/!PC Scripts/Start-LocalAI.ps1".format(d)
-        if os.path.exists(cand):
-            return cand
-    raise BridgeError("Start-LocalAI.ps1 not found (set 'launcher' in config.json)")
+    raise BridgeError("Start-LocalAI.ps1 not found (set SCRIPTS_DIR in config.env)")
 
 
 def start_stack(ctx, log):

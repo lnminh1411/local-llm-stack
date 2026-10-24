@@ -16,8 +16,12 @@ HOME = os.path.expanduser("~")
 SHIM = r'''"""Finds the Local Agent Bridge on any drive (letters reshuffle on this PC) and runs it."""
 import os, runpy, sys
 
-CANDIDATES = [r"__HERE__"] + [f"{d}:\\Local LLM\\Bridge" for d in "EDFGHCIJKLMNOPQRSTUVWXYZ"]
-for base in CANDIDATES:
+candidates = [r"__HERE__"]
+script = os.path.join(candidates[0], "localagent.py")
+if not os.path.isfile(script):
+    candidates = [f"{d}:\\Local LLM\\Bridge" for d in "EDFGHCIJKLMNOPQRSTUVWXYZ"]
+
+for base in candidates:
     script = os.path.join(base, "localagent.py")
     if os.path.isfile(script):
         sys.argv[0] = script
@@ -41,6 +45,11 @@ def main():
         os.makedirs(target, exist_ok=True)
         shutil.copy2(src, os.path.join(target, "SKILL.md"))
         print("skill  ->", os.path.join(target, "SKILL.md"))
+
+    if not os.environ.get("LOCALAI_CONFIG"):
+        repo = os.path.dirname(HERE)
+        cfg = os.path.join(repo, "config.env")
+        print(f'reminder: setx LOCALAI_CONFIG "{cfg}"')
 
 
 if __name__ == "__main__":

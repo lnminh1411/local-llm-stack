@@ -18,29 +18,30 @@
 # Deliberately does NOT self-elevate: UAC is off on this PC (EnableLUA=0), so everything is already
 # admin, and an elevation relaunch would only create a second copy of the process.
 param(
-    # Occamy-1.0 35B-A3B MoE (default again since 2026-10-09). Found by file name on any fixed drive (this PC reshuffles drive letters).
+    # Every setting below defaults from config.env (central config, see config.env.example); pass a parameter to override it for one run.
+    # Model files are searched in MODEL_DIRS, else <every fixed drive>:\ModelCache.
     # Swift 1.5 Qwen3.8-27B heretic (tried 2026-10-09, ~2-3 tok/s, dropped): -ModelFile Swift-1.5-Qwen3.8-27B-heretic-GSQ-RCO-IQ3_S-mtp.gguf
     #   -MmprojFile Swift-1.5-Qwen3.8-27B-heretic-mmproj-Q8_0.gguf -ModelAlias swift-1.5-27b-iq3s -ChatTemplateFile Swift-1.5-Qwen3.8-27B-heretic-chat-template.jinja
     #   -MtpDraft 2 -MmprojGpu $false -Sampling swift   (sampling: temp 1.0 top-p 0.95 top-k 20 min-p 0, no presence penalty)
-    [string]$ModelFile = 'occamy-1.0-abliterated-FIT-QUALITY-17G-IQ4_XS.gguf',
-    [string]$MmprojFile = 'mmproj-occamy-1.0-abliterated-Q4_0.gguf',   # '' = text only
-    [string]$ModelAlias = 'occamy-1.0-fit-quality',
+    [string]$ModelFile,
+    [string]$MmprojFile,   # '' = text only
+    [string]$ModelAlias,
     # The model's embedded template 500s on several requests (extra system message, no user message, reasoning_effort high/minimal); the
     # patched one from the same repo accepts them. '' = use the GGUF's own template.
-    [string]$ChatTemplateFile = '',
-    [bool]$PinECores = $true,   # pin llama-server to the 12 E-cores so the P-cores stay free for the user (-PinECores $false = any core)
-    [int]$MtpDraft = 0,   # --spec-type draft-mtp --spec-draft-n-max N (the file carries an MTP head); 0 = no speculative decoding
+    [string]$ChatTemplateFile,
+    [bool]$PinECores,   # pin llama-server to the 12 E-cores so the P-cores stay free for the user (-PinECores $false = any core)
+    [int]$MtpDraft,   # --spec-type draft-mtp --spec-draft-n-max N (the file carries an MTP head); 0 = no speculative decoding
     # $false keeps the vision projector on the CPU (--no-mmproj-offload): frees ~0.7 GB of the 6 GB card for model layers.
     # Measured: GPU saves only ~0.4 s per image; the time is spent per image token (~15-23 ms each), so cap the tokens.
-    [bool]$MmprojGpu = $true,
-    [int]$ImageMaxTokens = 768,   # per image; 0 = model default (a 1080p screenshot is ~2000 tokens = ~49 s before the first answer token)
-    [ValidateSet('occamy','swift')][string]$Sampling = 'occamy',
-    [int]$FitTarget = 100,   # MiB of VRAM --fit leaves free
+    [bool]$MmprojGpu,
+    [int]$ImageMaxTokens,   # per image; 0 = model default (a 1080p screenshot is ~2000 tokens = ~49 s before the first answer token)
+    [ValidateSet('occamy','swift')][string]$Sampling,
+    [int]$FitTarget,   # MiB of VRAM --fit leaves free
     # 128k default. 256k (-Context 262144) halves generation speed on this 6 GB card (see Scripts.md), so use it
     # only on demand: .\Start-LocalAI.ps1 -Restart -Context 262144  (the Local Agent Bridge does this itself)
-    [int]$Context = 131072,
-    [double]$IdleUnloadMinutes = 20,   # 0 = never unload the model
-    [bool]$KeepAwake = $true,          # hold Windows awake (no idle sleep) while the model is loaded in VRAM; released on unload
+    [int]$Context,
+    [double]$IdleUnloadMinutes,   # 0 = never unload the model
+    [bool]$KeepAwake,          # hold Windows awake (no idle sleep) while the model is loaded in VRAM; released on unload
     [switch]$Restart,
     [switch]$NoGateway,   # leave the OpenClaw gateway alone (also on -Restart)
     [switch]$Warm,        # prime the prompt cache with OpenClaw's ~23k-token system prompt
@@ -49,22 +50,49 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
-# Intel Core Ultra 7 265K, no HT. EfficiencyClass 0 = E-cores = CPUs 2-5,10-17 (verified via
-# GetSystemCpuSetInformation 04/10/2026). Mask = 0x3FC3C. Re-verify if the CPU ever changes.
-$ECoreMask   = [IntPtr]0x3FC3C
-$GpuUuid     = 'GPU-00000000-0000-0000-0000-000000000000'   # RTX 3050 (nvidia-smi -L)  # replace with your own UUID
-$ProxyPort   = 8080    # what clients use
-$LlamaPort   = 8081    # the real llama-server
-$GatewayPort = 18789
-$OllamaLib   = Join-Path $env:LOCALAPPDATA 'Programs\Ollama\lib\ollama'
-$LogDir      = Join-Path $env:USERPROFILE '.openclaw\logs'
+. (Join-Path $PSScriptRoot 'LocalAI-Config.ps1')
+$Cfg = Get-LocalAIConfig
+function ConvertTo-Flag($v, [bool]$default) { if ($v -eq '') { $default } else { $v -notin 'false', '0', 'no', 'off' } }
+if (-not $PSBoundParameters.ContainsKey('ModelFile'))         { $ModelFile = Get-Cfg $Cfg 'MODEL_FILE' }
+if (-not $PSBoundParameters.ContainsKey('MmprojFile'))        { $MmprojFile = Get-Cfg $Cfg 'MMPROJ_FILE' }
+if (-not $PSBoundParameters.ContainsKey('ModelAlias'))        { $ModelAlias = Get-Cfg $Cfg 'MODEL_ALIAS' 'local-model' }
+if (-not $PSBoundParameters.ContainsKey('ChatTemplateFile'))  { $ChatTemplateFile = Get-Cfg $Cfg 'CHAT_TEMPLATE_FILE' }
+if (-not $PSBoundParameters.ContainsKey('PinECores'))         { $PinECores = ConvertTo-Flag (Get-Cfg $Cfg 'PIN_ECORES') $true }
+if (-not $PSBoundParameters.ContainsKey('MtpDraft'))          { $MtpDraft = [int](Get-Cfg $Cfg 'MTP_DRAFT' 0) }
+if (-not $PSBoundParameters.ContainsKey('MmprojGpu'))         { $MmprojGpu = ConvertTo-Flag (Get-Cfg $Cfg 'MMPROJ_GPU') $true }
+if (-not $PSBoundParameters.ContainsKey('ImageMaxTokens'))    { $ImageMaxTokens = [int](Get-Cfg $Cfg 'IMAGE_MAX_TOKENS' 768) }
+if (-not $PSBoundParameters.ContainsKey('Sampling'))          { $Sampling = Get-Cfg $Cfg 'SAMPLING' 'occamy' }
+if (-not $PSBoundParameters.ContainsKey('FitTarget'))         { $FitTarget = [int](Get-Cfg $Cfg 'FIT_TARGET' 100) }
+if (-not $PSBoundParameters.ContainsKey('Context'))           { $Context = [int](Get-Cfg $Cfg 'CONTEXT' 131072) }
+if (-not $PSBoundParameters.ContainsKey('IdleUnloadMinutes')) { $IdleUnloadMinutes = [double](Get-Cfg $Cfg 'IDLE_UNLOAD_MINUTES' 20) }
+if (-not $PSBoundParameters.ContainsKey('KeepAwake'))         { $KeepAwake = ConvertTo-Flag (Get-Cfg $Cfg 'KEEP_AWAKE') $true }
+
+# E-core affinity (Intel Core Ultra 7 265K: EfficiencyClass 0 = CPUs 2-5,10-17 = 0x3FC3C, verified via GetSystemCpuSetInformation).
+# Re-verify with a new CPU, then set ECORE_MASK in config.env.
+$ECoreMask   = [IntPtr][Convert]::ToInt64(((Get-Cfg $Cfg 'ECORE_MASK' '0') -replace '^0x', ''), 16)
+$GpuUuid     = Get-Cfg $Cfg 'GPU_UUID'          # nvidia-smi -L
+$HostAddr    = Get-Cfg $Cfg 'HOST' '127.0.0.1'
+$ProxyPort   = [int](Get-Cfg $Cfg 'PROXY_PORT' 8080)    # what clients use
+$LlamaPort   = [int](Get-Cfg $Cfg 'LLAMA_PORT' 8081)    # the real llama-server
+$GatewayPort = [int](Get-Cfg $Cfg 'GATEWAY_PORT' 18789)
+$OllamaLib   = Get-Cfg $Cfg 'OLLAMA_LIB' (Join-Path $env:LOCALAPPDATA 'Programs\Ollama\lib\ollama')
+$LogDir      = Get-Cfg $Cfg 'LOG_DIR' (Join-Path $env:USERPROFILE '.openclaw\logs')
+$LocalAIHome = Get-Cfg $Cfg 'LOCALAI_HOME'
 $ProxyScript = Join-Path $PSScriptRoot 'llama-wake.py'
+$ModelDirs   = @((Get-Cfg $Cfg 'MODEL_DIRS') -split ';' | Where-Object { $_ })
+if (-not $ModelDirs) { $ModelDirs = @(Get-PSDrive -PSProvider FileSystem | ForEach-Object { Join-Path $_.Root 'ModelCache' }) }
+$py = Get-Cfg $Cfg 'PYTHON'
+if (-not $py) { $py = (Get-Command python.exe -ErrorAction SilentlyContinue).Source }
+if (-not $py) { throw 'python.exe not found: set PYTHON in config.env' }
+function Find-ModelFile([string]$name) {
+    $ModelDirs | ForEach-Object { Join-Path $_ $name } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+}
 
 # Raw connect, not Get-NetTCPConnection: that CIM query intermittently returns nothing for a live
 # listener, which made an early version start duplicate servers.
 function Test-Port($port) {
     $c = New-Object Net.Sockets.TcpClient
-    try { $c.Connect('127.0.0.1', $port); $true } catch { $false } finally { $c.Dispose() }
+    try { $c.Connect($HostAddr, $port); $true } catch { $false } finally { $c.Dispose() }
 }
 function Stop-ByCommandLine($pattern) {
     Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match $pattern -and $_.ProcessId -ne $PID } |
@@ -74,7 +102,7 @@ function Stop-ByCommandLine($pattern) {
 function Wait-Backend {
     # Loading 17 GB takes a while. /health answers 503 until the model is ready.
     for ($i = 0; $i -lt 180; $i++) {
-        try { if ((Invoke-WebRequest "http://127.0.0.1:$LlamaPort/health" -UseBasicParsing -TimeoutSec 2).StatusCode -eq 200) { return } } catch {}
+        try { if ((Invoke-WebRequest "http://${HostAddr}:$LlamaPort/health" -UseBasicParsing -TimeoutSec 2).StatusCode -eq 200) { return } } catch {}
         Start-Sleep -Seconds 2
     }
 }
@@ -85,14 +113,12 @@ function Start-Backend {
     # Keep Ollama from grabbing the GPU/RAM behind our back (its tray app respawns a server).
     Get-Process -Name 'ollama app', ollama -ErrorAction SilentlyContinue | Stop-Process -Force
 
-    $gguf = Get-PSDrive -PSProvider FileSystem | ForEach-Object { Join-Path $_.Root "ModelCache\$ModelFile" } |
-        Where-Object { Test-Path $_ } | Select-Object -First 1
-    if (-not $gguf) { throw "Model file not found in <drive>:\ModelCache\: $ModelFile" }
+    $gguf = Find-ModelFile $ModelFile
+    if (-not $gguf) { throw "Model file not found in $($ModelDirs -join '; '): $ModelFile" }
     $mmproj = $null
     if ($MmprojFile) {
-        $mmproj = Get-PSDrive -PSProvider FileSystem | ForEach-Object { Join-Path $_.Root "ModelCache\$MmprojFile" } |
-            Where-Object { Test-Path $_ } | Select-Object -First 1
-        if (-not $mmproj) { throw "Vision projector not found in <drive>:\ModelCache\: $MmprojFile" }
+        $mmproj = Find-ModelFile $MmprojFile
+        if (-not $mmproj) { throw "Vision projector not found in $($ModelDirs -join '; '): $MmprojFile" }
     }
 
     $cuda = Join-Path $OllamaLib 'cuda_v12'
@@ -113,7 +139,7 @@ function Start-Backend {
     $KvType = if ($ModelAlias -like 'swift*' -and $Context -gt 65536) { 'q4_0' } else { 'q8_0' }
     $args2 = @(
         '--model', "`"$gguf`"", '--alias', $ModelAlias,
-        '--host', '127.0.0.1', '--port', $LlamaPort, '--no-webui', '-np', '1',
+        '--host', $HostAddr, '--port', $LlamaPort, '--no-webui', '-np', '1',
         '-c', $Context, '-t', 12, '-tb', 12, '-b', 4096, '-ub', 4096,
         '--flash-attn', 'on', '-ctk', $KvType, '-ctv', $KvType,
         '--fit', 'on', '--fit-target', $FitTarget, '--no-mmap',
@@ -124,9 +150,8 @@ function Start-Backend {
     if ($Sampling -eq 'swift') { $args2 += @('--temp', 1.0, '--top-p', 0.95, '--top-k', 20, '--min-p', 0) }
     else { $args2 += @('--temp', 0.7, '--top-p', 0.8, '--top-k', 20, '--min-p', 0, '--presence-penalty', 1.5) }
     if ($ChatTemplateFile) {
-        $tpl = Get-PSDrive -PSProvider FileSystem | ForEach-Object { Join-Path $_.Root "ModelCache\$ChatTemplateFile" } |
-            Where-Object { Test-Path $_ } | Select-Object -First 1
-        if (-not $tpl) { throw "Chat template not found in <drive>:\ModelCache\: $ChatTemplateFile" }
+        $tpl = Find-ModelFile $ChatTemplateFile
+        if (-not $tpl) { throw "Chat template not found in $($ModelDirs -join '; '): $ChatTemplateFile" }
         $args2 += @('--chat-template-file', "`"$tpl`"")
     }
     if ($MtpDraft -gt 0) { $args2 += @('--spec-type', 'draft-mtp', '--spec-draft-n-max', $MtpDraft) }
@@ -154,8 +179,7 @@ if ($Restart) {
 
 # --- wake proxy on :8080 ------------------------------------------------------------------------
 if (-not (Test-Port $ProxyPort)) {
-    $py = (Get-Command python.exe -ErrorAction SilentlyContinue).Source
-    if (-not $py) { $py = Join-Path $env:LOCALAPPDATA 'Programs\Python\Python312\python.exe' }
+
     $proxyArgs = @("`"$ProxyScript`"", '--ctx', $Context, '--idle-minutes', $IdleUnloadMinutes, '--alias', $ModelAlias,
         '--launcher', "`"$PSCommandPath`"")
     if (-not $KeepAwake) { $proxyArgs += '--no-keep-awake' }
@@ -168,7 +192,7 @@ if (-not (Test-Port $ProxyPort)) {
 if ($ProxyOnly) { return }
 
 # --- model (blocks until llama-server is up at the right context) --------------------------------
-Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$ProxyPort/_gate/ensure" -ContentType 'application/json' `
+Invoke-RestMethod -Method Post -Uri "http://${HostAddr}:$ProxyPort/_gate/ensure" -ContentType 'application/json' `
     -Body (@{ ctx = $Context } | ConvertTo-Json) -TimeoutSec 900 | Out-Null
 
 # --- OpenClaw gateway ---------------------------------------------------------------------------
@@ -176,9 +200,9 @@ Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$ProxyPort/_gate/ensure" -
 # explanation for the crash-loop breaker on 2026-08-09..13 (EPERM unlink, several PIDs in one ms).
 # Re-apply the exec-guard Discord approval card patch (an OpenClaw / Discord plugin update wipes it). Idempotent, must run before the gateway starts.
 if (-not $NoGateway) {
-    $cardPatch = Get-PSDrive -PSProvider FileSystem | ForEach-Object { Join-Path $_.Root 'Local LLM\ExecGuard\patch_discord_card.py' } |
-        Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-    if ($cardPatch) { & python $cardPatch | Out-Null }
+    $cardPatch = if ($LocalAIHome) { Join-Path $LocalAIHome 'ExecGuard\patch_discord_card.py' }
+    if ($cardPatch -and -not (Test-Path -LiteralPath $cardPatch)) { $cardPatch = $null }
+    if ($cardPatch) { & $py $cardPatch | Out-Null }
 }
 if (-not $NoGateway -and -not (Test-Port $GatewayPort)) {
     Start-Process -FilePath cmd.exe -ArgumentList '/c', 'openclaw gateway run' -WindowStyle Hidden `
@@ -188,11 +212,11 @@ if (-not $NoGateway -and -not (Test-Port $GatewayPort)) {
 
 # exec runs in mode "full" because the exec-guard plugin is the gate. If the gateway did not load it, fall back to mode "ask".
 if (-not $NoGateway) {
-    $guardCheck = Get-PSDrive -PSProvider FileSystem | ForEach-Object { Join-Path $_.Root 'Local LLM\ExecGuard\guard_check.py' } |
-        Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    $guardCheck = if ($LocalAIHome) { Join-Path $LocalAIHome 'ExecGuard\guard_check.py' }
+    if ($guardCheck -and -not (Test-Path -LiteralPath $guardCheck)) { $guardCheck = $null }
     if ($guardCheck) {
         for ($i = 0; $i -lt 60 -and -not (Test-Port $GatewayPort); $i++) { Start-Sleep -Seconds 1 }
-        & python $guardCheck --wait 45 | Out-Null
+        & $py $guardCheck --wait 45 | Out-Null
     }
 }
 
