@@ -1,5 +1,5 @@
 # Registers the two scheduled tasks of the stack, fully in the background and without VBScript:
-#   "Local AI Startup"        at logon (+1 min): Start-LocalAI.ps1 -Warm   (model, gateway, cache warm-up)
+#   "Local AI Startup"        at logon (+1 min): Start-LocalAI.ps1 -NoModel   (wake proxy + OpenClaw gateway; the model stays unloaded until a request needs it)
 #   "Local AI Proxy Watchdog" at logon + every 2 min: Start-LocalAI.ps1 -ProxyOnly   (restarts a dead wake proxy, never wakes the model)
 # The action is `conhost.exe --headless powershell.exe ...`: conhost never creates a console window, so nothing flashes
 # on screen (powershell.exe -WindowStyle Hidden alone still flashes one for a moment). Trade-off: Task Scheduler's
@@ -18,9 +18,9 @@ $pri = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -
 
 $logon = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $logon.Delay = 'PT1M'
-Register-ScheduledTask -TaskName 'Local AI Startup' -Action (New-HiddenAction '-Warm') -Trigger $logon -Principal $pri -Force `
+Register-ScheduledTask -TaskName 'Local AI Startup' -Action (New-HiddenAction '-NoModel') -Trigger $logon -Principal $pri -Force `
     -Settings (New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 20) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries) `
-    -Description 'Starts the local AI stack at logon, hidden, no VBScript.' | Out-Null
+    -Description 'Starts the wake proxy and the gateway at logon without loading the model, hidden, no VBScript.' | Out-Null
 
 $trg = @((New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME),
          (New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 2) -RepetitionDuration (New-TimeSpan -Days 3650)))

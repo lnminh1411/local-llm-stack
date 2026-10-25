@@ -45,6 +45,7 @@ param(
     [switch]$Restart,
     [switch]$NoGateway,   # leave the OpenClaw gateway alone (also on -Restart)
     [switch]$Warm,        # prime the prompt cache with OpenClaw's ~23k-token system prompt
+    [switch]$NoModel,     # start the proxy and the gateway but do not load the model: it loads on the first real request (the logon task uses this)
     [switch]$ProxyOnly,   # start just the wake proxy if :8080 is closed, never wake the model or touch the gateway (the watchdog task uses this)
     [switch]$BackendOnly  # internal: start llama-server on :8081 and return (called by the wake proxy)
 )
@@ -191,9 +192,11 @@ if (-not (Test-Port $ProxyPort)) {
 
 if ($ProxyOnly) { return }
 
-# --- model (blocks until llama-server is up at the right context) --------------------------------
+# --- model (blocks until llama-server is up at the right context)
+if (-not $NoModel) {
 Invoke-RestMethod -Method Post -Uri "http://${HostAddr}:$ProxyPort/_gate/ensure" -ContentType 'application/json' `
     -Body (@{ ctx = $Context } | ConvertTo-Json) -TimeoutSec 900 | Out-Null
+}
 
 # --- OpenClaw gateway ---------------------------------------------------------------------------
 # Only one instance, ever. Racing instances fighting over Temp\openclaw\gateway.*.lock is the best
@@ -222,7 +225,7 @@ if (-not $NoGateway) {
 
 # A cold first turn re-evaluates the whole ~23k-token prompt (about a minute on this setup). One
 # throwaway turn through the gateway leaves that prefix in llama-server's prompt cache.
-if ($Warm -and -not $NoGateway) {
+if ($Warm -and -not $NoGateway -and -not $NoModel) {
     for ($i = 0; $i -lt 60 -and -not (Test-Port $GatewayPort); $i++) { Start-Sleep -Seconds 1 }
     & openclaw agent --agent main -m 'Reply with the single word: ready' | Out-Null
 }
