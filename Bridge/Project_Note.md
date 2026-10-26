@@ -13,8 +13,8 @@ Lets Claude Code and Antigravity hand work to the local Occamy-1.0 (35B-A3B MoE,
 | `sync.py` | Installs the skill to `~/.claude/skills/local-agent/` and `~/.gemini/config/skills/local-agent/`, and writes the shim `~/.local-agent/la.py` that finds this folder on whatever drive letter it has. Re-run after moving the folder or editing `SKILL.md`. |
 
 Outside this folder (same stack):
-- `F:\!PC Scripts\Start-LocalAI.ps1` starts the wake proxy, llama-server and the OpenClaw gateway.
-- `F:\!PC Scripts\llama-wake.py` is the wake-on-request proxy on :8080 (real llama-server on :8081).
+- The `LocalAIHost` service (`..\Service`) starts the wake proxy and the OpenClaw gateway; `..\Launcher\Start-LocalAI.ps1` starts the service (and, with `-BackendOnly`, llama-server for the proxy).
+- `..\Launcher\llama-wake.py` is the wake-on-request proxy on :8080 (real llama-server on :8081).
 - State: `~/.local-agent/` (jobs, `gpu.lock`, `heavy.json`). Jobs older than 7 days are pruned.
 - Global rule: "Local Agent Offloading" section in `~/.claude/CLAUDE.md` and `~/.gemini/GEMINI.md`.
 - The OpenClaw agent has its own copy of the `antigravity` skill in `~/.openclaw/workspace/skills/antigravity/`.

@@ -19,3 +19,8 @@ __pycache__/
 *.pyc
 node_modules/
 *.log
+
+# .NET build output (Service\)
+bin/
+obj/
+Service/publish/

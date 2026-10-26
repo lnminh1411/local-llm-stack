@@ -1,5 +1,6 @@
 # Starts the local AI stack, once each. Safe to run repeatedly: a service that is already up is left alone
-# unless -Restart.
+# unless -Restart. Normally the Local AI Host service (..\Service) starts everything at boot; with it installed this
+# script only starts/asks the service, except -BackendOnly (the wake proxy calls that to start llama-server).
 #
 #   OpenClaw / Local Agent Bridge  ->  :8080 wake proxy (llama-wake.py)  ->  :8081 llama-server  (RTX 3050 + E-cores)
 #   OpenClaw gateway (Discord bot) on :18789
@@ -45,8 +46,8 @@ param(
     [switch]$Restart,
     [switch]$NoGateway,   # leave the OpenClaw gateway alone (also on -Restart)
     [switch]$Warm,        # prime the prompt cache with OpenClaw's ~23k-token system prompt
-    [switch]$NoModel,     # start the proxy and the gateway but do not load the model: it loads on the first real request (the logon task uses this)
-    [switch]$ProxyOnly,   # start just the wake proxy if :8080 is closed, never wake the model or touch the gateway (the watchdog task uses this)
+    [switch]$NoModel,     # start the proxy and the gateway but do not load the model: it loads on the first real request
+    [switch]$ProxyOnly,   # start just the wake proxy if :8080 is closed, never wake the model or touch the gateway
     [switch]$BackendOnly  # internal: start llama-server on :8081 and return (called by the wake proxy)
 )
 $ErrorActionPreference = 'Stop'
@@ -168,6 +169,38 @@ function Start-Backend {
 
 # --- internal mode: the wake proxy asks for the backend and nothing else ------------------------
 if ($BackendOnly) { Start-Backend; return }
+
+# --- service mode: the Local AI Host service (Service\) owns the wake proxy and the gateway -----
+# Starting them here as well would only make the service wait for these copies to go away.
+function Send-LocalAIHost([string]$command) {
+    $p = New-Object IO.Pipes.NamedPipeClientStream('.', 'LocalAIHost', [IO.Pipes.PipeDirection]::InOut)
+    try {
+        $p.Connect(5000)
+        $w = New-Object IO.StreamWriter($p); $w.NewLine = "`n"; $w.AutoFlush = $true
+        $w.WriteLine($command); (New-Object IO.StreamReader($p)).ReadLine()
+    } finally { $p.Dispose() }
+}
+$svc = Get-Service -Name LocalAIHost -ErrorAction SilentlyContinue
+if ($svc) {
+    if ($svc.Status -ne 'Running') { Start-Service -Name LocalAIHost; Start-Sleep -Seconds 3 }
+    if ($Restart) {
+        Get-Process -Name llama-server -ErrorAction SilentlyContinue | Stop-Process -Force
+        Send-LocalAIHost 'restart wake-proxy' | Out-Null
+        if (-not $NoGateway) { Send-LocalAIHost 'restart gateway' | Out-Null }
+        Start-Sleep -Seconds 3
+    }
+    for ($i = 0; $i -lt 60 -and -not (Test-Port $ProxyPort); $i++) { Start-Sleep -Seconds 1 }
+    if ($ProxyOnly) { return }
+    if (-not $NoModel) {
+        Invoke-RestMethod -Method Post -Uri "http://${HostAddr}:$ProxyPort/_gate/ensure" -ContentType 'application/json' `
+            -Body (@{ ctx = $Context } | ConvertTo-Json) -TimeoutSec 900 | Out-Null
+    }
+    if ($Warm -and -not $NoGateway -and -not $NoModel) {
+        for ($i = 0; $i -lt 60 -and -not (Test-Port $GatewayPort); $i++) { Start-Sleep -Seconds 1 }
+        & openclaw agent --agent main -m 'Reply with the single word: ready' | Out-Null
+    }
+    return
+}
 
 if ($Restart) {
     Get-Process -Name 'ollama app', ollama, llama-server -ErrorAction SilentlyContinue | Stop-Process -Force

@@ -1,6 +1,6 @@
 # Live status hub (ESP32 / dashboards)
 
-One place that knows what the local AI is doing. It lives in the wake proxy (`F:\!PC Scripts\ai_hub.py`, served by `llama-wake.py` on `127.0.0.1:8080`), because every client (OpenClaw, the Local Agent Bridge, Open WebUI) already goes through it. Localhost only. Status endpoints never wake the model.
+One place that knows what the local AI is doing. It lives in the wake proxy (`Launcher\ai_hub.py`, served by `llama-wake.py` on `127.0.0.1:8080`), because every client (OpenClaw, the Local Agent Bridge, Open WebUI) already goes through it. Localhost only. Status endpoints never wake the model.
 
 ## Read
 | Endpoint | Returns |

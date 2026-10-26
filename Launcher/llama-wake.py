@@ -14,7 +14,7 @@ an unload re-processes the whole prompt (~36 s for OpenClaw's 24k-token system p
 Admin endpoints (not forwarded):
   GET  /_gate/status
   POST /_gate/ensure  {"ctx": N, "exact": false}   start / resize the backend, block until ready
-  POST /_gate/sleep                                unload the model now
+  POST /_gate/sleep  {"force": false}              unload the model now (refused while a request runs unless force)
   POST /_gate/config  {"idle_minutes": N}          0 disables idle unload
   POST /_gate/config  {"keep_awake": false}        stop holding Windows awake while the model is loaded (default on)
   GET  /_gate/ai | /_gate/ai/flat | /_gate/ai/stream   live inference / tool / guardrail status (ESP32 display); POST /_gate/event feeds it. See ai_hub.py
@@ -157,14 +157,14 @@ class Backend:
                 self.waking = False
             self.touch()
 
-    def sleep_now(self):
+    def sleep_now(self, force=False):
         with self.life:
             with self.cv:
-                if self.inflight:
+                if self.inflight and not force:
                     return False
-            if not self.ready():
+            if not self.ready() and not force:
                 return True
-            log("unloading backend (idle)")
+            log("unloading backend (forced)" if force else "unloading backend (idle)")
             self.stop()
             self.desired_ctx = A.ctx           # a 256K swap does not outlive an unload
             return True
@@ -257,7 +257,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(500, {"error": str(e)})
             return self._json(200, B.status())
         if p == "/_gate/sleep":
-            return self._json(200, {"ok": B.sleep_now()})
+            return self._json(200, {"ok": B.sleep_now(bool(args.get("force")))})
         if p == "/_gate/config":
             if "idle_minutes" in args:
                 B.idle_minutes = float(args["idle_minutes"])
