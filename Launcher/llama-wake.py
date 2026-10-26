@@ -222,6 +222,18 @@ class Handler(BaseHTTPRequestHandler):
         self.close_connection = True
 
     def _body(self):
+        # .NET's PostAsJsonAsync (LocalAIHost) sends chunked bodies without a
+        # Content-Length; reading 0 bytes there dropped every admin argument
+        if "chunked" in (self.headers.get("Transfer-Encoding") or "").lower():
+            out = b""
+            while True:
+                size = int(self.rfile.readline().split(b";")[0].strip() or b"0", 16)
+                if size == 0:
+                    while self.rfile.readline() not in (b"\r\n", b"\n", b""):
+                        pass   # trailers
+                    return out
+                out += self.rfile.read(size)
+                self.rfile.readline()   # CRLF after each chunk
         n = int(self.headers.get("Content-Length") or 0)
         return self.rfile.read(n) if n else b""
 
