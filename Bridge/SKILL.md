@@ -12,7 +12,7 @@ description: >-
 # Local Agent Bridge
 
 The local agent is Occamy-1.0, a 35B-parameter MoE model (3B active, with vision) running on this PC. It is **slower and less capable than you**
-(~26 tok/s generation, ~250-600 tok/s prompt processing, a cold `run` costs ~20-30 s of harness prompt; no knowledge past its training) but costs no cloud tokens and sees files directly. You are the
+(~18-22 tok/s generation, ~665 tok/s prompt processing, a cold `run` costs ~20-30 s of harness prompt; no knowledge past its training) but costs no cloud tokens and sees files directly. You are the
 orchestrator: give it bounded, checkable work, then verify what comes back.
 
 One CLI, same for Claude Code and Antigravity:

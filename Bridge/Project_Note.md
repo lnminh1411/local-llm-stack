@@ -6,7 +6,7 @@ Lets Claude Code and Antigravity hand work to the local Occamy-1.0 (35B-A3B MoE,
 ## Files
 | File | Purpose |
 |---|---|
-| `harness_worker.py` | Runs one `run` job through DeepSeek Harness (venv `harnessenv`, SDK `deepseek-harness-sdk` 0.1.5rc1): builds the dsh config patch, denies approvals, counts steps/tokens, enforces step and time limits. Talks to localagent.py via `LOG`/`RESULT` lines on stdout. |
+| `harness_worker.py` | Runs one `run` job through DeepSeek Harness (venv `harness\venv`, SDK `deepseek-harness-sdk` 0.1.5rc1): builds the dsh config patch, denies approvals, counts steps/tokens, enforces step and time limits. Talks to localagent.py via `LOG`/`RESULT` lines on stdout. |
 | `localagent.py` | The CLI (stdlib only). `ask`, `run`, `status`, `up`, `heavy`, `wait`, `result`, `jobs`, `cancel`. |
 | `config.json` | Endpoint, model alias, 128K/256K sizes, idle minutes, launcher path, sampling. Missing keys fall back to defaults in the script. |
 | `SKILL.md` | The `local-agent` skill text for both agents. Edit here, then run `sync.py`. |
@@ -46,8 +46,8 @@ Outside this folder (same stack):
 - Antigravity verified end to end through `agy -p ... --dangerously-skip-permissions`.
 
 ## Open
-- Not git-tracked.
-- Logon autostart with the wake proxy and a Discord message waking an unloaded model are untested end to end.
+- Git-tracked in the local LLM stack repository.
+- Service autostart at boot with the wake proxy and a Discord message waking an unloaded model are untested end to end.
 
 
 ## Harness engine (2026-10-09)
@@ -59,4 +59,4 @@ Outside this folder (same stack):
 - Verified end to end: read-only grep/read, `--write` confinement, skill load (`grilling`), `--exec --detach`.
 
 ## Status reporting (2026-10-23)
-`localagent.py` (`hub_event`) and `harness_worker.py` (`hub`) post job, step, tool and sandbox-refusal events to the wake proxy's status hub (`E:\Local LLM\StatusHub.md`), so the ESP32 display can show what a Bridge job is doing. Fire-and-forget, 0.7 s timeout, never affects the job.
+`localagent.py` (`hub_event`) and `harness_worker.py` (`hub`) post job, step, tool and sandbox-refusal events to the wake proxy's status hub (`docs\status-hub.md`), so the ESP32 display can show what a Bridge job is doing. Fire-and-forget, 0.7 s timeout, never affects the job.

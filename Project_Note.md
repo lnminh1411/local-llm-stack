@@ -1,11 +1,11 @@
 # Local LLM: project note
 
-Everything around the local model (Occamy-1.0 35B-A3B on the RTX 3050 + E-cores) lives here. Combined 2026-10-05 from four folders. One git repo at this root (nothing committed yet).
+Everything around the local model (Occamy-1.0 35B-A3B on the RTX 3050 + E-cores) lives here. Combined 2026-10-05 from four folders. One git repo at this root.
 
 | Folder | What it is | Entry points |
 |---|---|---|
 | `Bridge\` | Lets Claude Code and Antigravity hand work to the local model (`local-agent` skill). | `localagent.py`, `sync.py` (re-run after editing `SKILL.md` or moving the folder) |
-| `WebUI\` | Open WebUI behind a password gate for phone/LAN, open on localhost, started at logon. | `start-webui.ps1`, `authproxy.py`, `patch_frontend.py` + `greetings.txt` (opening greeting, always-visible Edit pencil), scheduled task "Local WebUI Startup" |
+| `WebUI\` | Open WebUI behind a password gate for phone/LAN, open on localhost, started at boot by LocalAIHost. | `start-webui.ps1`, `authproxy.py`, `patch_frontend.py` + `greetings.txt` (opening greeting, always-visible Edit pencil) |
 | `ExecGuard\` | OpenClaw plugin: gates the Discord agent's shell (double confirm for catastrophes, writes need you, read-only runs). | `index.js`, `classify.js`, `patch_discord_card.py`, `guard_check.py`, `manage.py` |
 | `ContentGuard\` | OpenClaw plugin: Discord-only guardrails (18+, slurs, hate, harassment, self-harm, gore). | `index.js`, `moderate.js`, `custom-terms.txt` |
 
@@ -42,7 +42,7 @@ llama-server now comes from the official llama.cpp release b12005, Windows CUDA 
 - A gateway config "restart" is deferred while an agent run is active: kill the `openclaw gateway run` processes and run `Start-LocalAI.ps1` (with the service installed: send `restart gateway` to the pipe, or `Start-LocalAI.ps1 -Restart`).
 
 ## Live status hub (2026-10-23)
-`StatusHub.md` documents it. `Launcher\ai_hub.py` (in the wake proxy) exposes `GET /_gate/ai`, `/_gate/ai/flat` (ESP32-friendly `key=value`), `/_gate/ai/stream` (SSE) and takes `POST /_gate/event`: inference phase (prompt / generating / tool / waiting approval), live and last token speed, time taken, current tool, Bridge job step, guard state (exec / content / sandbox: checking, tripped, waiting approval, approved, denied, timed out), GPU. New folders: `StatusReporter\` (OpenClaw plugin: agent runs and tool calls; registered in `plugins.load.paths` with `hooks.allowConversationAccess`), `shared\hub.js` (fire-and-forget reporter used by the plugins). ExecGuard and ContentGuard now report their state.
+`docs/status-hub.md` documents it. `Launcher\ai_hub.py` (in the wake proxy) exposes `GET /_gate/ai`, `/_gate/ai/flat` (ESP32-friendly `key=value`), `/_gate/ai/stream` (SSE) and takes `POST /_gate/event`: inference phase (prompt / generating / tool / waiting approval), live and last token speed, time taken, current tool, Bridge job step, guard state (exec / content / sandbox: checking, tripped, waiting approval, approved, denied, timed out), GPU. New folders: `StatusReporter\` (OpenClaw plugin: agent runs and tool calls; registered in `plugins.load.paths` with `hooks.allowConversationAccess`), `shared\hub.js` (fire-and-forget reporter used by the plugins). ExecGuard and ContentGuard now report their state.
 - Found while wiring this: ContentGuard's `before_agent_run` (inbound Discord check) was being BLOCKED by OpenClaw 2026.7.x ("non-bundled plugins must set plugins.entries.content-guard.hooks.allowConversationAccess=true"). Set to true on 2026-10-23, so inbound filtering works again; check the gateway log for `blocked because` after any OpenClaw upgrade.
 - OpenClaw build here has no `agent_start` hook (ignored); the reporter uses `before_agent_run`. `after_tool_call` did not report a tool end for `exec`, so the hub also closes a running tool when the next model call starts.
 
