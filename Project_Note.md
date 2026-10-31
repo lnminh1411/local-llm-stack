@@ -32,6 +32,9 @@ The two guards only run inside the OpenClaw gateway. ExecGuard also calls the mo
 - Found while building it: `llama-wake.py` takes `--listen-port`/`--backend-port`, and the old launcher never passed them, so `PROXY_PORT`/`LLAMA_PORT` in config.env had no effect on the proxy. The service passes them.
 - `POST /_gate/sleep {"force": true}` now unloads even while a request runs.
 
+## Ollama removed, official llama.cpp (2026-10-31)
+llama-server now comes from the official llama.cpp release b12005, Windows CUDA 12.4 x64 (`llama-b12005-bin-win-cuda-12.4-x64.zip` + `cudart-llama-bin-win-cuda-12.4-x64.zip`), extracted flat into `%LOCALAPPDATA%\Programs\llama.cpp` (config key `LLAMA_DIR`, replaces `OLLAMA_LIB`). Ollama is uninstalled. Changes: no `GGML_BACKEND_PATH` (the backends load from the exe's folder), `--no-mmap` became `--load-mode none`, and the launcher no longer kills Ollama processes. Measured on b12005: prefill 665 tok/s at 18.7k tokens (was 520-600), generation 22 tok/s on a short prompt and 18 tok/s at 18.7k context, 5.4 GB VRAM. The older notes said ~26 tok/s generation; no A/B was run because Ollama's build was already gone, so treat the gap as unconfirmed. To upgrade: extract a newer zip pair over the folder and send `model reload`.
+
 ## Traps (all folders)
 - Do not match processes by a command-line pattern from inside a command that contains that pattern (the shell kills itself).
 - The Bash tool mangles some heredocs and refuses `rm -rf` style removals: write files with the editor tools, use plain `mv` for moves.

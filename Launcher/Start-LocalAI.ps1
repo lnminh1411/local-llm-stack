@@ -13,8 +13,9 @@
 # ~1.4 GB VRAM margin it will not let us shrink, and ignores LLAMA_ARG_* overrides. Measured on
 # Qwen3.6-35B-A3B Q4_K_M at 10k-token prompts (04/10/2026): Ollama 217 tok/s prefill, 15% on GPU,
 # 4.1 GB VRAM; llama-server -ub 4096 --fit-target 200: 597 tok/s prefill, 5.5 GB VRAM, same ~27 tok/s
-# generation. Ollama stays installed ONLY because its lib\ollama folder ships llama-server.exe and the
-# CUDA backend; no Ollama models are used any more.
+# generation. Since 2026-10-31 llama-server comes from the official llama.cpp Windows CUDA 12.4 release
+# (LLAMA_DIR: llama-bXXXXX-bin-win-cuda-12.4-x64.zip + cudart-llama-bin-win-cuda-12.4-x64.zip extracted
+# into one folder); Ollama is gone. To upgrade: extract a newer pair over that folder.
 #
 # Deliberately does NOT self-elevate: UAC is off on this PC (EnableLUA=0), so everything is already
 # admin, and an elevation relaunch would only create a second copy of the process.
@@ -77,7 +78,7 @@ $HostAddr    = Get-Cfg $Cfg 'HOST' '127.0.0.1'
 $ProxyPort   = [int](Get-Cfg $Cfg 'PROXY_PORT' 8080)    # what clients use
 $LlamaPort   = [int](Get-Cfg $Cfg 'LLAMA_PORT' 8081)    # the real llama-server
 $GatewayPort = [int](Get-Cfg $Cfg 'GATEWAY_PORT' 18789)
-$OllamaLib   = Get-Cfg $Cfg 'OLLAMA_LIB' (Join-Path $env:LOCALAPPDATA 'Programs\Ollama\lib\ollama')
+$LlamaDir    = Get-Cfg $Cfg 'LLAMA_DIR' (Join-Path $env:LOCALAPPDATA 'Programs\llama.cpp')   # llama-server.exe + ggml-cuda.dll + cudart
 $LogDir      = Get-Cfg $Cfg 'LOG_DIR' (Join-Path $env:USERPROFILE '.openclaw\logs')
 $LocalAIHome = Get-Cfg $Cfg 'LOCALAI_HOME'
 $ProxyScript = Join-Path $PSScriptRoot 'llama-wake.py'
@@ -112,8 +113,8 @@ function Wait-Backend {
 function Start-Backend {
     # Port already open = a llama-server is running or still loading: just wait for it.
     if (Test-Port $LlamaPort) { Wait-Backend; return }
-    # Keep Ollama from grabbing the GPU/RAM behind our back (its tray app respawns a server).
-    Get-Process -Name 'ollama app', ollama -ErrorAction SilentlyContinue | Stop-Process -Force
+    $exe = Join-Path $LlamaDir 'llama-server.exe'
+    if (-not (Test-Path -LiteralPath $exe)) { throw "llama-server.exe not found in $LlamaDir (set LLAMA_DIR in config.env)" }
 
     $gguf = Find-ModelFile $ModelFile
     if (-not $gguf) { throw "Model file not found in $($ModelDirs -join '; '): $ModelFile" }
@@ -123,10 +124,11 @@ function Start-Backend {
         if (-not $mmproj) { throw "Vision projector not found in $($ModelDirs -join '; '): $MmprojFile" }
     }
 
-    $cuda = Join-Path $OllamaLib 'cuda_v12'
     $env:CUDA_VISIBLE_DEVICES = $GpuUuid                     # RTX 3050 only; RX 6600 / iGPU never seen
-    $env:PATH = "$cuda;$OllamaLib;$env:PATH"
-    $env:GGML_BACKEND_PATH = Join-Path $cuda 'ggml-cuda.dll'  # without this llama-server silently runs CPU-only
+    $env:PATH = "$LlamaDir;$env:PATH"                         # cudart / cublas sit beside the exe
+    # ggml loads its backends (ggml-cuda.dll, ggml-cpu-*.dll) from the exe's folder by itself; the old Ollama
+    # layout needed GGML_BACKEND_PATH because CUDA lived in a cuda_v12 subfolder. Clear any inherited value.
+    Remove-Item Env:GGML_BACKEND_PATH -ErrorAction SilentlyContinue
 
     # MTP speculative decoding (--spec-type draft-mtp --spec-draft-n-max 2) is deliberately OFF: measured
     # on this model it lifts generation 26.5 -> 31.1 tok/s but drops prompt processing 668 -> 178 tok/s,
@@ -144,7 +146,7 @@ function Start-Backend {
         '--host', $HostAddr, '--port', $LlamaPort, '--no-webui', '-np', '1',
         '-c', $Context, '-t', 12, '-tb', 12, '-b', 4096, '-ub', 4096,
         '--flash-attn', 'on', '-ctk', $KvType, '-ctv', $KvType,
-        '--fit', 'on', '--fit-target', $FitTarget, '--no-mmap',
+        '--fit', 'on', '--fit-target', $FitTarget, '--load-mode', 'none',   # = the old --no-mmap
         '--jinja', '--reasoning', 'off',
         '--cache-ram', 6144
     )
@@ -158,7 +160,7 @@ function Start-Backend {
     }
     if ($MtpDraft -gt 0) { $args2 += @('--spec-type', 'draft-mtp', '--spec-draft-n-max', $MtpDraft) }
     if ($mmproj) { $args2 += @('--mmproj', "`"$mmproj`""); if (-not $MmprojGpu) { $args2 += '--no-mmproj-offload' }; if ($ImageMaxTokens -gt 0) { $args2 += @('--image-max-tokens', $ImageMaxTokens) } }
-    $srv = Start-Process -FilePath (Join-Path $OllamaLib 'llama-server.exe') -ArgumentList $args2 -WindowStyle Hidden -PassThru `
+    $srv = Start-Process -FilePath $exe -ArgumentList $args2 -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput (Join-Path $LogDir 'llama-stdout.log') `
         -RedirectStandardError  (Join-Path $LogDir 'llama-stderr.log')
     # Launched from the Task Scheduler watchdog the process inherits BelowNormal priority (halved generation speed), so force Normal.
@@ -203,7 +205,7 @@ if ($svc) {
 }
 
 if ($Restart) {
-    Get-Process -Name 'ollama app', ollama, llama-server -ErrorAction SilentlyContinue | Stop-Process -Force
+    Get-Process -Name llama-server -ErrorAction SilentlyContinue | Stop-Process -Force
     Stop-ByCommandLine 'llama-wake\.py'
     # -NoGateway also means "leave the gateway alone" (the Local Agent Bridge swaps context size with
     # -Restart -NoGateway and must not drop the Discord bot).
