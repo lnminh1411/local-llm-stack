@@ -35,6 +35,10 @@ The two guards only run inside the OpenClaw gateway. ExecGuard also calls the mo
 ## Ollama removed, official llama.cpp (2026-10-31)
 llama-server now comes from the official llama.cpp release b12005, Windows CUDA 12.4 x64 (`llama-b12005-bin-win-cuda-12.4-x64.zip` + `cudart-llama-bin-win-cuda-12.4-x64.zip`), extracted flat into `%LOCALAPPDATA%\Programs\llama.cpp` (config key `LLAMA_DIR`, replaces `OLLAMA_LIB`). Ollama is uninstalled. Changes: no `GGML_BACKEND_PATH` (the backends load from the exe's folder), `--no-mmap` became `--load-mode none`, and the launcher no longer kills Ollama processes. Measured on b12005: prefill 665 tok/s at 18.7k tokens (was 520-600), generation 22 tok/s on a short prompt and 18 tok/s at 18.7k context, 5.4 GB VRAM. The older notes said ~26 tok/s generation; no A/B was run because Ollama's build was already gone, so treat the gap as unconfirmed. To upgrade: extract a newer zip pair over the folder and send `model reload`.
 
+## Vision projector on the CPU, RX 6600 tried and dropped (2026-11-01)
+- The gap above was the vision projector, not the build. With it on the 3050, generation was 25.3 / 18.5 tok/s (short / 18.7k context); without it, 29.9 / 26.3. Now `MMPROJ_GPU=false` (also the launcher default): measured 27-31 tok/s short, 23.6 tok/s at 18.7k, prompt 697 tok/s, and a 1920x1080 image (741 tokens) takes ~10 s to encode.
+- RX 6600 as a second device (Vulkan backend, `--device CUDA0,Vulkan0`, `--fit-target 100,N`): a ~1.4 GB share gave 32.0 tok/s (within noise), ~3.4 GB gave 25.0 tok/s with prompt 258 tok/s, ~4.6 GB gave 16.7 tok/s with prompt 141 tok/s. The 6600 also drives the desktop (~2.5 GB in use). Not worth it; production stays CUDA-only, and the production folder has no `ggml-vulkan.dll`. The Intel iGPU shares system RAM and adds nothing.
+
 ## Traps (all folders)
 - Do not match processes by a command-line pattern from inside a command that contains that pattern (the shell kills itself).
 - The Bash tool mangles some heredocs and refuses `rm -rf` style removals: write files with the editor tools, use plain `mv` for moves.

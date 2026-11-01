@@ -67,7 +67,7 @@ The table below lists every setting defined in [config.env.example](../config.en
 | `MTP_DRAFT` | `0` | Number of draft tokens for speculative decoding (0 disables) | `Launcher/Start-LocalAI.ps1` |
 | `FIT_TARGET` | `100` | Target unallocated VRAM margin in MiB for dynamic layer offloading | `Launcher/Start-LocalAI.ps1` |
 | `IMAGE_MAX_TOKENS` | `768` | Maximum tokens generated per input image (0 uses model default) | `Launcher/Start-LocalAI.ps1` |
-| `MMPROJ_GPU` | `true` | Offloads vision projector to GPU when true; keeps on CPU when false | `Launcher/Start-LocalAI.ps1` |
+| `MMPROJ_GPU` | `false` | Vision projector on the GPU when true; on the CPU when false (the model keeps that VRAM: ~29 vs ~25 tok/s generation on the RTX 3050; an image takes ~10 s to encode) | `Launcher/Start-LocalAI.ps1` |
 | `KEEP_AWAKE` | `true` | Prevents Windows idle sleep while model is resident in VRAM | `Launcher/Start-LocalAI.ps1`, `Service/Supervisor.cs` |
 | `GPU_UUID` | `GPU-00000000-0000-0000-0000-000000000000` | Device UUID assigned to `CUDA_VISIBLE_DEVICES` | `Launcher/Start-LocalAI.ps1` |
 | `ECORE_MASK` | `0x3FC3C` | CPU affinity mask for E-cores on Intel Core Ultra 7 265K | `Launcher/Start-LocalAI.ps1` |

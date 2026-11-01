@@ -18,7 +18,7 @@ All parameters read defaults from `config.env` unless specified on the command l
 | `-ChatTemplateFile` | string | `CHAT_TEMPLATE_FILE` | Custom Jinja template file name, or empty to use GGUF template |
 | `-PinECores` | bool | `PIN_ECORES` | Pins `llama-server` to E-cores when true (default true) |
 | `-MtpDraft` | int | `MTP_DRAFT` | Draft token count for MTP speculative decoding (0 disables) |
-| `-MmprojGpu` | bool | `MMPROJ_GPU` | Keeps vision projector on GPU when true, CPU when false (default true) |
+| `-MmprojGpu` | bool | `MMPROJ_GPU` | Vision projector on the GPU when true, CPU when false (default false) |
 | `-ImageMaxTokens` | int | `IMAGE_MAX_TOKENS` | Maximum image token limit (default 768) |
 | `-Sampling` | string | `SAMPLING` | Sampling profile: `occamy` or `swift` (default `occamy`) |
 | `-FitTarget` | int | `FIT_TARGET` | Target free VRAM margin in MiB (default 100) |
