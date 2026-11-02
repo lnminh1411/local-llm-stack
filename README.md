@@ -1,7 +1,12 @@
 # Local LLM stack
 
 Always-available local AI stack on Windows, running Occamy-1.0 35B-A3B on an RTX 3050 and CPU E-cores. A Windows service keeps the stack running and the model loads on demand. Guard plugins filter the Discord agent, and a CLI lets cloud coding agents hand work to the local model.
-The companion [ESP32-PC-Control-System](https://github.com/lnminh1411/ESP32-PC-Control-System) board shows the stack's status on its displays (from the status hub's flat feed) and controls it from its Discord tab through its Windows helper and the control pipe.
+
+## Companion projects
+
+| Project | Role for this stack |
+|---|---|
+| [ESP32 PC Control System](https://github.com/lnminh1411/ESP32-PC-Control-System) (main project) | Desk board. Shows the stack's status on its displays (from the status hub's flat feed) and controls it from its Discord tab through its Windows helper and the control pipe |
 
 ## Architecture
 
