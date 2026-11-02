@@ -15,7 +15,7 @@ All status endpoints bind to localhost only. Reading status endpoints never wake
 
 ## Flat feed keys
 
-`GET /_gate/ai/flat` returns newline-separated `key=value` pairs.
+`GET /_gate/ai/flat` returns newline-separated `key=value` pairs (`text/plain`; newlines inside values become spaces; the connection closes after each reply).
 
 | Key | Type | Description |
 |---|---|---|
@@ -30,7 +30,7 @@ All status endpoints bind to localhost only. Reading status endpoints never wake
 | `ai.gen_tokens` | integer | Tokens generated (live count while active, else last request total). |
 | `ai.prompt_tokens` | integer | Prompt tokens evaluated during the last request. |
 | `ai.tool` | string | Current or recent tool name. Empty when idle. |
-| `ai.tool_state` | string | Tool execution state (`running`, `done`, `error`). |
+| `ai.tool_state` | string | Tool execution state (`running`, `done`, `error`), empty when no tool is shown. |
 | `ai.tool_s` | float | Tool run time in seconds while active, otherwise `0.0`. |
 | `ai.step` | integer | Current step index of an active Bridge job. |
 | `ai.step_max` | integer | Maximum step count configured for the Bridge job. |
@@ -38,7 +38,7 @@ All status endpoints bind to localhost only. Reading status endpoints never wake
 | `ai.job_state` | string | Bridge job state: `queued`, `running`, or a final state such as `done`, `error`, `cancelled`, `truncated`, `max_steps`, `timeout`, `context_exhausted`. |
 | `ai.guard` | integer | Code for the highest-severity guard state (`0` to `6`). |
 | `ai.guard_name` | string | Highest-severity guard state name. |
-| `ai.guard_detail` | string | Detail string from the highest-priority non-clear guard. |
+| `ai.guard_detail` | string | The `exec` guard's detail while it is not clear, else the `content` guard's detail, else the `sandbox` guard's detail. |
 | `ai.guard_trips` | integer | Total count of guard trip events since startup. |
 | `ai.agent` | integer | `1` when an OpenClaw agent run is active, otherwise `0`. |
 | `ai.client` | string | Client user agent or identifier from the active request header. |
@@ -150,6 +150,6 @@ Bridge jobs:
 
 The companion project [ESP32-PC-Control-System](https://github.com/lnminh1411/ESP32-PC-Control-System) displays PC and AI stack statistics on three ST7789 screens.
 
-The host service (`host/pc_stats`, written in C#) polls `http://127.0.0.1:8080/_gate/ai/flat` once per second. Numeric values map directly to telemetry dictionaries, such as `/localai/0/phase` and `/localai/0/gen_tok_s`. String fields (`ai.tool`, `ai.guard_detail`, `ai.phase_name`) require custom text handling (such as `@t key text`) in `pcstats.cpp`.
+Its Windows helper (`ESP32-Helper.exe`, `host/pc_stats`, written in C#) polls `http://127.0.0.1:8080/_gate/ai/flat` once per second (`stats.ini` line `@source ai http://127.0.0.1:8080/_gate/ai/flat 1000`). It forwards every `ai.*` key to the board under the same name, numbers as `@s` stats and strings as `@t` text stats, and adds `ai.ok` (1 when the hub answered within 3 seconds; otherwise 0 and the other `ai.*` keys are dropped). The board's Discord "Local Agent" tab controls the stack through the helper and the [control pipe](service.md#esp32-helper), not through this feed.
 
 Because `/_gate/` requests are marked passive, polling never wakes the model or resets the idle unload timer.

@@ -76,6 +76,8 @@ The pure classifier in [classify.js](../ExecGuard/classify.js) evaluates command
 | `readonly` | 0 | none | none | Runs immediately without prompts. Includes safe PowerShell inspection cmdlets (`Get-*`, `Select-Object`, `Format-Table`), safe git subcommands (`status`, `log`, `diff`), and informational utilities (`whoami`, `hostname`, `nvidia-smi`). |
 | `unknown` | 0 or 1 | none, critical, or warning | depends on AI | Not on allowlists and lacks write indicators. Dispatched to the local AI reviewer. |
 
+Decision order in stage 1: `catastrophic`, `danger` and `sensitive` always prompt. Only then are saved approvals (`approved.json`, exact normalised command) checked, so an "allow always" entry can only skip the prompt for `write` and `unknown` commands. Next `readonly` runs at once, and `unknown` goes to the AI reviewer.
+
 ### Model review for unknown commands
 
 When a command falls into tier `unknown`, [reviewer.js](../ExecGuard/reviewer.js) queries the local model through `POST /v1/chat/completions`.
@@ -192,7 +194,7 @@ Inbound checks skip evaluation if `event.senderIsOwner` is true and `ownerExempt
 
 [moderate.js](../ContentGuard/moderate.js) processes text in five stages:
 1. Length validation: text shorter than 3 trimmed characters passes immediately (`allow`, source `short`).
-2. Hard minor protection: checks `sexual_minors` pattern regex (proximity of minor and sexual terms within 0 to 6 words). Matches block immediately (`block`, source `hard-rule`) without calling the model.
+2. Hard minor protection (only while `sexual_minors` is in `blockCategories`): checks `sexual_minors` pattern regex (proximity of minor and sexual terms within 0 to 6 words, either order). Matches block immediately (`block`, source `hard-rule`) without calling the model.
 3. Lexicon matching: normalizes text (NFKD, accent removal, leetspeak conversion `@4->a, 3->e, 1->i, 0->o, $5->s, 7->t`) and scans against compiled terms. If `mode` is `triggered` and zero terms match, text passes immediately (`allow`, source `no-trigger`).
 4. Model classification: calls `POST /v1/chat/completions` on the local model with structured JSON output schema returning `category` and `reason`.
 5. Decision resolution:

@@ -19,13 +19,29 @@ LocalAIHost supervises up to four child processes. The model weights remain unlo
 
 If `KEEP_AWAKE=false`, `wake-proxy` receives `--no-keep-awake`.
 
+The `webui` and `authproxy` ports come from `WebUI\.env` (`WEBUI_BACKEND_PORT`, default 8338; `WEBUI_PORT`, default 8337), not from `config.env`. If `WebUI\venv\Scripts\python.exe` is missing, the service logs it and supervises neither.
+
+Python for `wake-proxy` and the ExecGuard helpers is `PYTHON` from `config.env`, else the first `python.exe` on PATH outside `WindowsApps` (the Store stub); with neither, the service fails to start.
+
+### Child environment
+
+Children get the service's environment plus the machine variables and the service account's user variables (read by SID from `HKEY_USERS\<SID>\Environment`, because in a service `HKCU` can resolve to `.DEFAULT`), with `PATH` = machine PATH;user PATH. The service adds `LOCALAI_HOST_SERVICE=1` for every child. `webui` also gets the variables from `WebUI\openwebui.env` plus `DATA_DIR=WebUI\data`, `HF_HOME=WebUI\data\hf` and `PYTHONUTF8=1`.
+
+Each child's standard input is closed; its standard output and error are appended to the log files below, with a `=== <time> started by Local AI Host, pid N` header line per start.
+
 The `gateway` process runs two helpers:
 - Pre-start: `python ExecGuard\patch_discord_card.py` runs before start with a 1 minute timeout.
 - Post-ready: `python ExecGuard\guard_check.py --wait 45` runs after the port opens with a 2 minute timeout.
 
 The `webui` process runs `python patch_frontend.py` before start with a 2 minute timeout. It sets processor affinity to `PCORE_MASK` (default `0xC03C3`) and waits up to 5 minutes for port readiness.
 
-The `authproxy` process runs on the Python 3.12 interpreter set by `WEBUI_PROXY_PYTHON` in `WebUI\.env` or found at `%LOCALAPPDATA%\Programs\Python\Python312\python.exe`. It sets processor affinity to `PCORE_MASK`.
+The `authproxy` process runs on the Python 3.12 interpreter set by `WEBUI_PROXY_PYTHON` in `WebUI\.env` or found at `%LOCALAPPDATA%\Programs\Python\Python312\python.exe`, else on the Open WebUI venv Python. It sets processor affinity to `PCORE_MASK`.
+
+Other children wait up to 2 minutes for their port after start; a child whose port never opens is kept running and watched.
+
+### Child states
+
+`status` reports each child as `starting`, `running` (port accepts connections), `backoff` (waiting to restart), `stopped` (held down by `stop`) or `external` (see below), with `pid`, `port`, `restarts` and `up_s` (only while running).
 
 ## Restart policy
 
@@ -99,8 +115,8 @@ What the installer does:
 3. Stops any running `LocalAIHost` service instance.
 4. Compiles the project using `dotnet publish` into `Service\publish`.
 5. Removes legacy scheduled tasks: "Local AI Startup", "Local AI Proxy Watchdog", "Local WebUI Startup".
-6. Terminates old running processes matching `llama-wake.py`, `gateway run`, `open-webui`, or `authproxy`.
-7. Registers the service with startup type `delayed-auto`.
+6. Terminates old running processes matching `llama-wake.py`, the OpenClaw `gateway run` entry point, or `open-webui`/`open_webui`/`authproxy` under the WebUI folder.
+7. Registers the service with startup type `delayed-auto` and binary path `LocalAIHost.exe --config "<config path>"` (the user's `LOCALAI_CONFIG`, else the repo `config.env`). The password is set through WMI, never on a command line.
 8. Configures service recovery via `sc.exe failure LocalAIHost reset= 86400 actions= restart/5000/restart/30000/restart/60000` (restarts after 5 seconds, 30 seconds, and 60 seconds).
 9. Starts the service and verifies pipe connectivity with a `status` probe.
 
@@ -119,11 +135,14 @@ The named pipe security descriptor allows `PipeAccessRights.FullControl` to:
 - `BUILTIN\Administrators`
 - The user account running LocalAIHost (`WindowsIdentity.GetCurrent().User`)
 
+The pipe is created with the maximum number of server instances, so several clients can be connected at once. If creating it fails, the service logs the error and retries after 5 seconds.
+
 ### Wire format
 
 Clients connect to `\\.\pipe\LocalAIHost` and communicate via UTF-8 text streams:
-- Requests: single text line up to 4096 bytes, terminated by a newline (`\n` or `\r\n`).
+- Requests: single text line up to 4096 characters, terminated by a newline (`\n` or `\r\n`). Tokens are split on spaces and lowercased. Several requests may be sent on one connection.
 - Responses: single JSON line terminated by a newline (`\n`).
+- A longer line gets `{"ok":false,"error":"line too long"}` and the connection closes. An empty line gets `empty command`; an unknown verb gets `unknown command (try help)`.
 
 Response structures:
 - Success: `{"ok":true,"data":...}`
@@ -138,12 +157,12 @@ Response structures:
 | `ping` | Synchronous | Tests pipe responsiveness. | `{"pong":true}` |
 | `status` | Synchronous | Returns supervisor state, child states, model status, and background task outcome. | `{"children":{...},"model":{...},"last":{...},"busy":false}` |
 | `help` | Synchronous | Returns array of supported command strings. | Array of command syntax strings |
-| `model load [ctx]` | Background | Loads model via proxy `/_gate/ensure`. Optional `ctx` accepts numbers, `128k`, `default`, or `heavy`. | `{"started":"model load"}` |
-| `model unload` | Synchronous | Requests polite model unload via proxy `/_gate/sleep`. Returns error if requests are active. | `{"unloaded":true}` |
-| `model unload force` | Synchronous | Forces unload via proxy `/_gate/sleep {"force":true}`. Kills `llama-server.exe` directly if proxy is unresponsive. | `{"unloaded":true}` |
-| `model reload [ctx]` | Background | Forces model unload, then reloads with optional context size. | `{"started":"model reload"}` |
-| `model ctx <n\|default\|heavy>` | Background | Resizes model context to exact value. Range: 4096 to 1048576. Accepts numbers, `128k`, `default`, or `heavy`. | `{"started":"model ctx <n>"}` |
-| `model idle <minutes, 0 = never>` | Synchronous | Sets idle unload timeout in minutes via proxy `/_gate/config`. Accepts numbers, where 0 disables auto-unload. | Current proxy status object |
+| `model load [ctx]` | Background | Loads model via proxy `/_gate/ensure` (`exact:false`, 20 minute cap): a loaded model is restarted only if its context is smaller than `ctx`. Optional `ctx` accepts numbers, `<N>k`, `default`, or `heavy`. | `{"started":"model load"}` |
+| `model unload` | Synchronous | Requests polite model unload via proxy `/_gate/sleep` (15 second cap). Returns `busy: a request is running (use: model unload force)` if requests are active, or `wake proxy unreachable (<type>)`. | `{"unloaded":true}` |
+| `model unload force` | Synchronous | Forces unload via proxy `/_gate/sleep {"force":true}` (8 second cap). Kills every `llama-server.exe` directly if the proxy fails or does not answer. | `{"unloaded":true}` |
+| `model reload [ctx]` | Background | Forces model unload, then loads again. With `ctx` the new context is exact; without it the proxy's default context is used. | `{"started":"model reload"}` |
+| `model ctx <n\|default\|heavy>` | Background | Resizes model context to exact value. Range: 4096 to 1048576 (else `context must be 4096..1048576`). Accepts numbers, `<N>k` (N x 1024), `default` (`CONTEXT`), or `heavy` (`HEAVY_CONTEXT`). | `{"started":"model ctx <n>"}` |
+| `model idle <minutes, 0 = never>` | Synchronous | Sets idle unload timeout in minutes via proxy `/_gate/config`. Accepts numbers, where 0 disables auto-unload. Lasts until the wake proxy restarts. | Current proxy status object |
 | `model keepawake <on\|off>` | Synchronous | Enables or disables Windows idle sleep blocking while model is loaded via proxy `/_gate/config`. | Current proxy status object |
 | `restart <name\|all>` | Synchronous | Restarts specified child or `all` children immediately without backoff delay. Allowed names: `wake-proxy`, `gateway`, `webui`, `authproxy`, `all`. | `{"action":"restart","targets":[...]}` |
 | `stop <name>` | Synchronous | Terminates child and holds it in `stopped` state. Name must be single child; `all` returns an error. | `{"action":"stop","targets":["<name>"]}` |
@@ -151,7 +170,9 @@ Response structures:
 | `gateway warm` | Background | Executes `cmd.exe /c openclaw agent --agent main -m "Reply with the single word: ready"` with a 15 minute timeout. | `{"started":"gateway warm"}` |
 | `guard check` | Background | Executes `python ExecGuard\guard_check.py --wait 45` with a 2 minute timeout. | `{"started":"guard check"}` |
 
-Background commands return `{"ok":true,"data":{"started":"<action>"}}` immediately. Only one background action runs at a time; if an action is in progress, background commands return `{"ok":false,"error":"busy with another action"}`. The outcome of the background action updates the `last` property in `status`.
+Background commands return `{"ok":true,"data":{"started":"<action>"}}` immediately. Only one background action runs at a time; if an action is in progress, background commands return `{"ok":false,"error":"busy with another action"}`. The outcome of the background action updates the `last` property in `status`: `action`, `result` (`running`, `ok` or `err <message>`) and `at` (`HH:mm:ss`).
+
+In `status`, `model` is the proxy's `/_gate/status` reply (6 second cap; see [launcher.md](launcher.md#admin-endpoints)), or `{"state":"down","error":"<exception type>"}` when the proxy does not answer.
 
 ### Sample request and response
 
@@ -203,6 +224,22 @@ Response:
   }
 }
 ```
+
+### ESP32 helper
+
+The ESP32 PC Controller's Windows helper (`ESP32-Helper.exe`, service `ESP32PcStats`, repository `E:\ESP32 PC Controller`, `host\pc_stats\PcStats.cs`) relays the board's Discord "Local Agent" tab to this pipe. Its service half runs as LocalSystem, which the pipe ACL allows.
+
+- It connects with anonymous impersonation (1 second connect timeout) and checks that the pipe server's process ID equals the PID of the running `LocalAIHost` service; otherwise it answers `err LocalAIHost not trusted`. Its read timeout is 20 seconds by default (a forced unload takes about 8 seconds).
+- The board sends `!ai <id> <command>` (`<id>` = 1-8 hex digits). The helper forwards only commands whose first word is `ping`, `status`, `model`, `restart`, `stop`, `start`, `gateway` or `guard` (else `err not allowed: <verb>`), one pipe request at a time, up to 4 queued (else `err busy`).
+- The answer goes back to the board as `<id> ok[ <info>]` or `<id> err <message>` (cut to 120 bytes). Background commands answer `ok started`. `status` is condensed to one line:
+
+```
+ok model=<state> ctx=<n>k|- want=<n>k idle=<min> keep=on|off busy=0|1 down=<child:state,...>|none last=<action>:<result>|-
+```
+
+Children in state `running` or `external` do not count as down; spaces in `action` and `result` become `_`.
+
+The Discord tab sends `status`, `model load`, `model unload`, `model unload force`, `model reload`, `model ctx default`, `model ctx heavy`, `model idle 0` / `model idle <minutes>`, `model keepawake on|off`, `gateway warm`, `guard check`, and `restart gateway|webui|wake-proxy`. The board also reads the status hub's flat feed; see [status-hub.md](status-hub.md#esp32-integration).
 
 ### PowerShell command invocation
 

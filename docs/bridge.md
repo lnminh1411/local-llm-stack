@@ -131,7 +131,9 @@ Prints a JSON object with model state, context mode, VRAM usage, queue status, a
 
 ### Subcommand: up
 
-Wakes the model server through the proxy (`/health`, `/_gate/ensure`) with the default 128K context. Takes no arguments.
+Wakes the model server through the proxy (`/_gate/status`, `/_gate/ensure`) with the default 128K context, then prints `status`. Takes no arguments.
+
+If the wake proxy itself is down, `up` (like every job) starts `Start-LocalAI.ps1 -NoGateway -Context <n>` detached and waits up to 120 seconds for the proxy. If llama-server answers but no proxy does, it stops with an error asking for `Start-LocalAI.ps1 -Restart`.
 
 ### Subcommand: heavy
 
@@ -178,7 +180,7 @@ Long-running jobs can run disconnected from the calling cloud agent.
 
 Bridge state is stored in `~/.local-agent/`:
 - `~/.local-agent/jobs/<job-id>/`: Contains individual job data:
-  - `job.json`: Job metadata, arguments, status (`queued`, `running`, `done`, `cancelled`, `error`), PID, timestamps.
+  - `job.json`: Job metadata, arguments, status (`queued`, `running`, then `done`, `error`, `cancelled`, `truncated`, `max_steps`, `timeout` or `context_exhausted`), PID, timestamps.
   - `log.txt`: Complete execution log with timestamps.
   - `result.json`: Final output, status, changed files list, token counts, timings.
   - `harness.request.json`: Input parameters passed to `harness_worker.py`.
@@ -226,10 +228,11 @@ Occamy-1.0 runs in one of two context configurations:
 
 ### Context rules and performance
 
-- Prefill and generation speed: At 128K context, llama.cpp b12005 delivers 665 tok/s prefill (at 18.7k context) and 18 to 22 tok/s generation. At 256K context, generation slows to ~14 tok/s and prefill slows to ~350 tok/s.
+- Prefill and generation speed: At 128K context, llama.cpp b12005 delivers ~697 tok/s prefill and 27 to 31 tok/s generation on a short prompt (23.6 tok/s at 18.7k context). At 256K context, generation slows to ~14 tok/s and prefill slows to ~350 tok/s.
+- Token counting: the preflight counts tokens with the proxy's `/tokenize` endpoint. That path is not passive, so counting wakes an unloaded model; if the call fails, the Bridge estimates characters / 3.2.
 - Explicit selection: Passing `--heavy` forces 256K context from start.
 - Auto-escalation: When calculating prompt tokens plus context files and token reserves (max completion tokens plus 6000 for `run` or 500 for `ask`), if the total exceeds 128K, `localagent.py` automatically escalates to 256K via proxy `POST /_gate/ensure {"ctx": 262144}`.
-- Mid-loop escalation: During a `run` session, if conversation tokens exceed `ctx - 2 * max_tokens - 4000`, the loop restarts the server at 256K context and continues.
+- Mid-loop escalation (`--legacy` engine only): if conversation tokens exceed `ctx - 2 * max_tokens - 4000`, the loop restarts the server at 256K context and continues; at 256K, or with `--no-escalate`, the job ends as `context_exhausted`. A DeepSeek Harness job keeps the context it started with and stops on `max_steps` or the `request_timeout_s` wall clock (3600 seconds, status `timeout`).
 - Forbidding escalation: Passing `--no-escalate` prevents switching to 256K. If prompt size exceeds 128K, it exits with exit code 3 (`EXIT_NEEDS_HEAVY`).
 - Hard limit: If prompt plus reserve exceeds 256K tokens, the bridge rejects the job with exit code 4 (`EXIT_TOO_BIG`).
 - Automatic reaper: When 256K is active, `touch_heavy()` spawns `la _reaper`. After `heavy_idle_minutes` (default 10) without active jobs, the reaper reverts context to 128K and primes the OpenClaw prompt cache.
@@ -289,11 +292,11 @@ In addition:
 
 The Bridge reports execution state to the wake proxy status hub documented in [status-hub.md](status-hub.md).
 
-Both `localagent.py` (`hub_event`) and `harness_worker.py` (`hub`) send fire-and-forget JSON payloads to `POST /_gate/event` with a 0.7 second timeout. Network or proxy errors are ignored so monitoring never halts task progress.
+Both `localagent.py` (`hub_event`) and `harness_worker.py` (`hub`) send fire-and-forget JSON payloads with `source: "bridge"` to `POST /_gate/event` with a 0.7 second timeout. Network or proxy errors are ignored so monitoring never halts task progress.
 
 Reported event types:
 - Job lifecycle:
-  `{"kind": "job", "id": "<job_id>", "state": "queued"|"running"|"done"|"error", "jtype": "ask"|"run", "engine": "harness"|"direct", "mode": "read-only"|"write"|"exec", "step": <n>, "max_steps": <max>, "step_label": "thinking"|"starting model"|"queued"}`
+  `{"kind": "job", "id": "<job_id>", "state": "queued"|"running"|<final status>, "jtype": "ask"|"run", "engine": "harness"|"direct", "mode": "read-only"|"write"|"exec", "prompt": "<first 80 chars>", "step": <n>, "max_steps": <max>, "step_label": "thinking"|"starting model"|"queued"}`
 - Tool execution:
   `{"kind": "tool", "state": "start"|"end"|"error", "name": "<tool_name>", "summary": "<arguments_prefix>"}`
 - Guard trips and sandbox refusals:

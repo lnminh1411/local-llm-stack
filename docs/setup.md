@@ -4,7 +4,7 @@
 
 - Windows x64.
 - NVIDIA GPU with CUDA support.
-- Python on `PATH`.
+- Python on `PATH`, or `PYTHON` set in `config.env` (a service may not see the user PATH).
 - .NET 10 SDK (required to compile LocalAIHost).
 - Node.js (required to run the plugin test suites).
 - OpenClaw, configured in `%USERPROFILE%\.openclaw`.
@@ -50,8 +50,9 @@ Re-run this script after any Windows account password change. See [service.md](s
 
 1. Edit `%USERPROFILE%\.openclaw\openclaw.json`.
 2. Add the directory paths for `ExecGuard`, `ContentGuard`, and `StatusReporter` to `plugins.load.paths`.
-3. Set `hooks.allowConversationAccess: true` for `ContentGuard` and `StatusReporter` in `plugins.entries`.
-4. Restart the gateway by sending `restart gateway` to `\\.\pipe\LocalAIHost`, or run:
+3. Set `hooks.allowConversationAccess: true` for `content-guard` and `status-reporter` in `plugins.entries`, and `hooks.timeoutMs: 200000` for `exec-guard`.
+4. Set `tools.exec.mode` to `full`: ExecGuard is the gate. If the gateway did not load it, `guard_check.py` switches the mode back to `ask`.
+5. Restart the gateway by sending `restart gateway` to `\\.\pipe\LocalAIHost`, or run:
    ```powershell
    .\Launcher\Start-LocalAI.ps1 -Restart
    ```

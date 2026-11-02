@@ -1,7 +1,7 @@
 # Local LLM stack
 
 Always-available local AI stack on Windows, running Occamy-1.0 35B-A3B on an RTX 3050 and CPU E-cores. A Windows service keeps the stack running and the model loads on demand. Guard plugins filter the Discord agent, and a CLI lets cloud coding agents hand work to the local model.
-The companion [ESP32-PC-Control-System](https://github.com/lnminh1411/ESP32-PC-Control-System) board shows the stack's status on its displays.
+The companion [ESP32-PC-Control-System](https://github.com/lnminh1411/ESP32-PC-Control-System) board shows the stack's status on its displays (from the status hub's flat feed) and controls it from its Discord tab through its Windows helper and the control pipe.
 
 ## Architecture
 
@@ -13,6 +13,7 @@ The companion [ESP32-PC-Control-System](https://github.com/lnminh1411/ESP32-PC-C
 | OpenClaw plugins | ExecGuard gates shell commands, ContentGuard filters Discord text, StatusReporter reports agent activity. | [docs/openclaw-plugins.md](docs/openclaw-plugins.md) |
 | Status hub | Serves JSON, SSE, and flat feeds for telemetry and microcontrollers. | [docs/status-hub.md](docs/status-hub.md) |
 | Configuration | Central environment variables for hardware, ports, and models. | [docs/configuration.md](docs/configuration.md) |
+| Open WebUI (`WebUI/`, not in git) | Browser chat on 127.0.0.1:8338 behind `authproxy.py` on :8337 (password for LAN clients), both run by the service. | [docs/service.md](docs/service.md) |
 
 Not in the repo: `WebUI/`, `Bridge/harness/`, `Bridge/legacy/`.
 
@@ -34,6 +35,7 @@ Full setup instructions: [docs/setup.md](docs/setup.md).
 - [docs/bridge.md](docs/bridge.md): Local Agent Bridge and `la` CLI
 - [docs/openclaw-plugins.md](docs/openclaw-plugins.md): ExecGuard, ContentGuard, StatusReporter, shared/
 - [docs/status-hub.md](docs/status-hub.md): status feed and ESP32 link
+- [docs/documentations_summary.md](docs/documentations_summary.md): what each doc covers, and where the cross-repo design doc lives
 
 ## Safety notes
 

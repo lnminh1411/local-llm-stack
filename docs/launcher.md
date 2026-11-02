@@ -39,19 +39,19 @@ When the `LocalAIHost` Windows service is installed:
 - If `-Restart` is specified, it stops `llama-server`, sends `restart wake-proxy` to `\\.\pipe\LocalAIHost`, and sends `restart gateway` unless `-NoGateway` is present.
 - It waits up to 60 seconds for proxy port `PROXY_PORT` to open.
 - If `-ProxyOnly` is present, it exits immediately after the proxy port is open.
-- Unless `-NoModel` is specified, it sends an HTTP POST request to `http://127.0.0.1:8080/_gate/ensure` with context size `Context` and blocks until the model is loaded.
+- Unless `-NoModel` is specified, it sends an HTTP POST request to `http://<HOST>:<PROXY_PORT>/_gate/ensure` with context size `Context` and blocks until the model is loaded (900 second timeout).
 - If `-Warm` is set (and neither `-NoGateway` nor `-NoModel` is active), it waits for gateway port `GATEWAY_PORT` and runs `openclaw agent --agent main -m 'Reply with the single word: ready'`.
 
 When running without the `LocalAIHost` service (standalone mode):
 - If `-Restart` is specified, it kills processes matching `llama-server`, `llama-wake.py`, and the gateway entry point.
-- If the proxy port is closed, it starts `llama-wake.py` directly using Python and logs output to `LOG_DIR\wake-proxy.log` and `LOG_DIR\wake-proxy-err.log`.
+- If the proxy port is closed, it starts `llama-wake.py` directly using Python and logs output to `LOG_DIR\wake-proxy.log` and `LOG_DIR\wake-proxy-err.log`. It does not pass `--listen-port`/`--backend-port`, so a standalone proxy uses its own defaults (8080/8081).
 - Unless `-NoModel` is specified, it issues an HTTP POST request to `/_gate/ensure` to load the model.
 - Unless `-NoGateway` is specified, it runs `ExecGuard\patch_discord_card.py`, starts `cmd.exe /c openclaw gateway run`, and runs `ExecGuard\guard_check.py --wait 45`.
 - If `-Warm` is set, it executes the prompt cache warmup query.
 
 ### Backend-only mode
 
-When invoked with `-BackendOnly`, `Start-LocalAI.ps1` bypasses all service, proxy, and gateway checks. It launches `llama-server.exe` on `LLAMA_PORT` (:8081) directly and waits for `http://127.0.0.1:8081/health` to return HTTP 200. The wake proxy invokes `-BackendOnly` when demand requires loading the model.
+When invoked with `-BackendOnly`, `Start-LocalAI.ps1` bypasses all service, proxy, and gateway checks. If `LLAMA_PORT` is already open it only waits; otherwise it looks up the model, projector and chat template in `MODEL_DIRS` (a missing file throws), launches `llama-server.exe` on `LLAMA_PORT` (:8081) in a hidden window, and polls `http://<HOST>:<LLAMA_PORT>/health` every 2 seconds, up to 180 times (about 6 minutes), until it returns HTTP 200. llama-server output goes to `LOG_DIR\llama-stdout.log` and `LOG_DIR\llama-stderr.log`. The wake proxy invokes `-BackendOnly` when demand requires loading the model.
 
 ### Llama-server flags
 
@@ -98,11 +98,11 @@ Before launching `llama-server.exe`, `Start-LocalAI.ps1`:
 - Prepends `$LlamaDir` to `$env:PATH` so DLLs resolve beside the executable.
 - Removes `GGML_BACKEND_PATH` to allow internal CUDA backend discovery.
 - Sets process priority to `Normal`.
-- If `$PinECores` is true, sets `ProcessorAffinity` to `$ECoreMask` (default `0x3FC3C`, corresponding to Intel Core Ultra 7 265K E-core CPUs 2 to 5 and 10 to 17).
+- If `$PinECores` is true, sets `ProcessorAffinity` to `ECORE_MASK`. The code has no built-in mask; the template value `0x3FC3C` corresponds to Intel Core Ultra 7 265K E-core CPUs 2 to 5 and 10 to 17.
 
 ## llama-wake.py
 
-[llama-wake.py](../Launcher/llama-wake.py) is a reverse proxy running on `127.0.0.1:8080`. It intercepts inference requests, starts `llama-server.exe` on demand, and unloads it during idle periods.
+[llama-wake.py](../Launcher/llama-wake.py) is a reverse proxy running on `127.0.0.1:8080`. It intercepts inference requests, starts `llama-server.exe` on demand, and unloads it during idle periods. It always binds `127.0.0.1` (it does not read `HOST`) and forwards to `127.0.0.1:<backend-port>`.
 
 ### Command-line arguments
 
@@ -112,7 +112,7 @@ Before launching `llama-server.exe`, `Start-LocalAI.ps1`:
 | `--backend-port` | int | `8081` | Port of the backend `llama-server` process |
 | `--ctx` | int | `131072` | Default context window size |
 | `--idle-minutes` | float | `20` | Idle timeout before unloading model (0 disables) |
-| `--alias` | string | `qwen3.6-35b-a3b-apex` | Model name returned in API responses |
+| `--alias` | string | `qwen3.6-35b-a3b-apex` | Model name returned in API responses while asleep. The service and launcher always pass `MODEL_ALIAS` |
 | `--launcher` | string | Required | Path to `Start-LocalAI.ps1` |
 | `--no-keep-awake` | flag | Present disables | Disables Windows idle sleep blocking while loaded |
 
@@ -123,7 +123,7 @@ Incoming HTTP requests follow two paths:
 2. Active requests (such as `/v1/chat/completions`): update the activity timestamp and call `ensure()`.
 
 When `ensure()` runs while the model is asleep:
-- It launches `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File <launcher> -BackendOnly -Context <ctx>`.
+- It launches `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File <launcher> -BackendOnly -Context <ctx>` with standard streams sent to `NUL`, capped at 600 seconds.
 - The proxy state changes to `waking`.
 - It polls `http://127.0.0.1:8081/health` every 2 seconds for up to 480 seconds until it receives HTTP 200.
 - Once ready, the state changes to `awake`.
@@ -142,7 +142,7 @@ the watchdog triggers `sleep_now()`. The proxy runs `taskkill /F /T /IM llama-se
 
 ### Keep-awake mechanism
 
-When enabled, a background thread calls the Windows kernel function `SetThreadExecutionState` every 10 seconds.
+When enabled, a background thread checks every 10 seconds whether the backend is waking or ready, and calls the Windows kernel function `SetThreadExecutionState` only when that state changes.
 - While the backend is waking or ready, it sets `ES_CONTINUOUS | ES_SYSTEM_REQUIRED` (flags `0x80000000 | 0x00000001`). This prevents Windows from entering idle sleep while model weights occupy VRAM.
 - When the backend unloads, it calls `SetThreadExecutionState(ES_CONTINUOUS)` to clear the system sleep block.
 
@@ -152,7 +152,7 @@ Clients can request context adjustments using `POST /_gate/ensure {"ctx": N, "ex
 - If `exact` is true, a restart occurs if current context does not equal target context.
 - If `exact` is false, a restart occurs if current context is smaller than target context.
 - Before restarting, the proxy waits up to 180 seconds for in-flight requests to complete.
-- It then stops the existing backend and calls `Start-LocalAI.ps1 -BackendOnly -Context 262144`.
+- It then stops the existing backend and calls `Start-LocalAI.ps1 -BackendOnly -Context <target>` (for example 262144 for `model ctx heavy`).
 - On subsequent idle unload, desired context resets to the default 128K (`131072`). Context enlargement to 256K does not persist past an unload.
 
 ### Admin endpoints
@@ -187,11 +187,15 @@ Upgrade steps:
 
 ## Measured performance
 
-Performance benchmarked on llama.cpp release b12005 with Occamy-1.0 35B-A3B FIT-QUALITY IQ4_XS and 4-bit vision projector on NVIDIA GeForce RTX 3050 6 GB and Intel Core Ultra 7 265K:
+Performance benchmarked on llama.cpp release b12005 with Occamy-1.0 35B-A3B FIT-QUALITY IQ4_XS and 4-bit vision projector on the CPU (`MMPROJ_GPU=false`), NVIDIA GeForce RTX 3050 6 GB and Intel Core Ultra 7 265K:
 
 | Metric | Measurement |
 |---|---|
 | GPU VRAM allocation | 5.4 GB |
-| Prompt processing (prefill) at 18.7k context | 665 tok/s |
-| Generation speed on short prompt | 22 tok/s |
-| Generation speed at 18.7k context | 18 tok/s |
+| Prompt processing (prefill) | ~697 tok/s |
+| Generation speed on short prompt | 27-31 tok/s |
+| Generation speed at 18.7k context | 23.6 tok/s |
+| 1920x1080 image | ~10 s to encode |
+| 256K context | ~14 tok/s generation, ~350 tok/s prefill |
+
+With the projector on the GPU, generation dropped to 25.3 / 18.5 tok/s (short / 18.7k context).
