@@ -1,6 +1,6 @@
 # Documentation summary
 
-The cross-repo system design (ESP32 board and helper, PcHwCtl, this stack, and the interfaces between them) is in `E:\System Architecture Documentation\ESP32 - Local LLM - PCHwCtl\ESP32-PcHwCtl-LocalLLM.md`, with a condensed copy for agents in `ESP32-PcHwCtl-LocalLLM.agents.md` in the same folder.
+The cross-repo system design (ESP32 board and helper, PcHwCtl, this stack, and the interfaces between them) is in `E:\System Architecture Documentation\ESP32 PC Control System\ESP32-PC-Control-System.md`, with a condensed copy for agents in `ESP32-PC-Control-System.agents.md` in the same folder.
 
 ## Overview
 
