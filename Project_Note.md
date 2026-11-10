@@ -39,6 +39,12 @@ llama-server now comes from the official llama.cpp release b12005, Windows CUDA 
 - The gap above was the vision projector, not the build. With it on the 3050, generation was 25.3 / 18.5 tok/s (short / 18.7k context); without it, 29.9 / 26.3. Now `MMPROJ_GPU=false` (also the launcher default): measured 27-31 tok/s short, 23.6 tok/s at 18.7k, prompt 697 tok/s, and a 1920x1080 image (741 tokens) takes ~10 s to encode.
 - RX 6600 as a second device (Vulkan backend, `--device CUDA0,Vulkan0`, `--fit-target 100,N`): a ~1.4 GB share gave 32.0 tok/s (within noise), ~3.4 GB gave 25.0 tok/s with prompt 258 tok/s, ~4.6 GB gave 16.7 tok/s with prompt 141 tok/s. The 6600 also drives the desktop (~2.5 GB in use). Not worth it; production stays CUDA-only, and the production folder has no `ggml-vulkan.dll`. The Intel iGPU shares system RAM and adds nothing.
 
+## OpenClaw 2026.11.2 on Node 26 (2026-11-10)
+- OpenClaw 2026.7.1-2 -> 2026.11.2 (npm global). It requires Node `>=24.16 <25 || >=26.1`; Node is now 26.12.1. Install with `npm install -g --allow-scripts=@google/genai,esbuild,protobufjs,openclaw openclaw@<ver>`: without `--allow-scripts`, npm 11 skips the postinstall that sets up the bundled plugins.
+- The first start fails with exit code 78, "state database schema migration required (audit-events-v2)". Fix: `stop gateway` on the pipe, then `openclaw doctor --fix --yes` from a normal shell, then `start gateway`. The state DB from before the migration is in K:ackups61110-213643__openclaw-state-pre-migration.
+- Verified: Discord connects; exec-guard, content-guard and status-reporter load (with the expected "can't verify where this plugin came from" warning for local paths); there is no `blocked because` line; the ExecGuard Discord card patch is still applied; tests pass on Node 26 (112 + 11).
+- Doctor still warns: the memory search provider is "openai" with no key. That predates the upgrade and is unrelated.
+
 ## Traps (all folders)
 - Do not match processes by a command-line pattern from inside a command that contains that pattern (the shell kills itself).
 - The Bash tool mangles some heredocs and refuses `rm -rf` style removals: write files with the editor tools, use plain `mv` for moves.
