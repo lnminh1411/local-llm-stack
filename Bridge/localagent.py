@@ -168,6 +168,8 @@ def hub_event(**ev):
     """Fire-and-forget status report to the wake proxy's hub (ESP32 display / dashboards). Never raises, never blocks long."""
     try:
         ev.setdefault("source", "bridge")
+        if ev.get("kind") == "job":
+            ev.setdefault("pid", os.getpid())   # lets the hub notice a job process that died without a final event
         req = urllib.request.Request(CFG["base_url"].rstrip("/") + "/_gate/event", data=json.dumps(ev).encode(),
                                      headers={"Content-Type": "application/json"})
         urllib.request.urlopen(req, timeout=0.7).read()
@@ -1008,6 +1010,7 @@ def cmd_cancel(a):
             pass
     Job(a.job, False).set(status="cancelled", ended=now())
     write_json(os.path.join(job_dir(a.job), "result.json"), {"ok": False, "status": "cancelled", "job": a.job})
+    hub_event(kind="job", id=a.job, state="cancelled", pid=pid)   # the killed process never sends its own final event
     print(f"cancelled {a.job}")
     return EXIT_OK
 

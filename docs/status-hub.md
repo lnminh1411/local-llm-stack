@@ -41,7 +41,7 @@ All status endpoints bind to localhost only. Reading status endpoints never wake
 | `ai.step` | integer | Current step index of an active Bridge job. |
 | `ai.step_max` | integer | Maximum step count configured for the Bridge job. |
 | `ai.job` | string | Active Bridge job identifier. |
-| `ai.job_state` | string | Bridge job state: `queued`, `running`, or a final state such as `done`, `error`, `cancelled`, `truncated`, `max_steps`, `timeout`, `context_exhausted`. |
+| `ai.job_state` | string | Bridge job state: `queued`, `running`, or a final state such as `done`, `error`, `cancelled`, `truncated`, `max_steps`, `timeout`, `context_exhausted`, or `lost` (the job process exited without a final event). |
 | `ai.guard` | integer | Code for the highest-severity guard state (`0` to `6`). |
 | `ai.guard_name` | string | Highest-severity guard state name. |
 | `ai.guard_detail` | string | The `exec` guard's detail while it is not clear, else the `content` guard's detail, else the `sandbox` guard's detail. |

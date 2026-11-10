@@ -37,6 +37,24 @@ def _now():
     return time.time()
 
 
+def _pid_alive(pid):
+    """Windows: the process exists and has not exited (STILL_ACTIVE). Unknown pid counts as alive."""
+    if not pid:
+        return True
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        h = k32.OpenProcess(0x1000, False, int(pid))   # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        code = ctypes.c_ulong()
+        ok = k32.GetExitCodeProcess(h, ctypes.byref(code))
+        k32.CloseHandle(h)
+        return bool(ok) and code.value == 259
+    except Exception:  # noqa: BLE001
+        return True
+
+
 class Hub:
     def __init__(self, backend, backend_port, alias):
         self.B, self.port, self.alias = backend, backend_port, alias
@@ -166,7 +184,7 @@ class Hub:
                         self.job["step_label"] = ""
                 else:
                     j = self.job if (self.job and self.job.get("id") == ev.get("id")) else {"id": ev.get("id"), "t0": now}
-                    for k in ("engine", "mode", "ctx", "step", "max_steps", "step_label", "prompt"):
+                    for k in ("engine", "mode", "ctx", "step", "max_steps", "step_label", "prompt", "pid"):
                         if k in ev:
                             j[k] = ev[k]
                     if "jtype" in ev:
@@ -319,7 +337,9 @@ class Hub:
             tool_running = self.tool["state"] == "running" and now - self.tool["since"] < 900
             tool_recent = self.tool["state"] in ("done", "error") and now - self.tool["end"] < TOOL_LINGER_S
             job = self.job
-            job_live = bool(job and job.get("state") in ("queued", "running") and now - job.get("ts", 0) < ACTIVE_JOB_STALE_S)
+            if job and job.get("state") in ("queued", "running") and not _pid_alive(job.get("pid")):
+                job.update(state="lost", ended=now, step_label="")   # its process died without a final event
+            job_live =bool(job and job.get("state") in ("queued", "running") and now - job.get("ts", 0) < ACTIVE_JOB_STALE_S)
             if model_state == "waking":
                 phase = "loading"
             elif gtop == "waiting_approval":
