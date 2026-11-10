@@ -41,7 +41,7 @@ llama-server now comes from the official llama.cpp release b12005, Windows CUDA 
 
 ## OpenClaw 2026.11.2 on Node 26 (2026-11-10)
 - OpenClaw 2026.7.1-2 -> 2026.11.2 (npm global). It requires Node `>=24.16 <25 || >=26.1`; Node is now 26.12.1. Install with `npm install -g --allow-scripts=@google/genai,esbuild,protobufjs,openclaw openclaw@<ver>`: without `--allow-scripts`, npm 11 skips the postinstall that sets up the bundled plugins.
-- The first start fails with exit code 78, "state database schema migration required (audit-events-v2)". Fix: `stop gateway` on the pipe, then `openclaw doctor --fix --yes` from a normal shell, then `start gateway`. The state DB from before the migration is in K:ackups61110-213643__openclaw-state-pre-migration.
+- The first start fails with exit code 78, "state database schema migration required (audit-events-v2)". Fix: `stop gateway` on the pipe, then `openclaw doctor --fix --yes` from a normal shell, then `start gateway`. The state DB from before the migration is in K:\backups\20261110-213643__openclaw-state-pre-migration.
 - Verified: Discord connects; exec-guard, content-guard and status-reporter load (with the expected "can't verify where this plugin came from" warning for local paths); there is no `blocked because` line; the ExecGuard Discord card patch is still applied; tests pass on Node 26 (112 + 11).
 - Doctor still warns: the memory search provider is "openai" with no key. That predates the upgrade and is unrelated.
 
