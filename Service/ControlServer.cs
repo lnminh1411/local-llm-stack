@@ -26,6 +26,7 @@ public sealed class ControlServer(LocalAIConfig cfg, IReadOnlyList<ManagedChild>
         "model ctx <n|default|heavy>", "model idle <minutes, 0 = never>", "model keepawake <on|off>",
         "restart <name|all>", "stop <name>", "start <name>",
         "gateway warm", "guard check",
+        "prompt", "subscribe prompt",
     ];
 
     readonly HttpClient http = new() { BaseAddress = new Uri($"http://{cfg.HostAddr}:{cfg.GetInt("PROXY_PORT", 8080)}"), Timeout = Timeout.InfiniteTimeSpan };
@@ -74,6 +75,11 @@ public sealed class ControlServer(LocalAIConfig cfg, IReadOnlyList<ManagedChild>
                 var line = await r.ReadLineAsync(ct);
                 if (line == null) break;
                 if (line.Length > MaxLine) { await w.WriteLineAsync(Reply(false, "line too long")); break; }
+                if (line.Trim().Equals("subscribe prompt", StringComparison.OrdinalIgnoreCase))
+                {
+                    await SubscribePromptAsync(w, ct);   // streams until the client disconnects
+                    break;
+                }
                 string answer;
                 try { answer = await HandleAsync(line.Trim(), ct); }
                 catch (Exception e) when (e is not OperationCanceledException) { answer = Reply(false, e.Message); }
@@ -101,10 +107,59 @@ public sealed class ControlServer(LocalAIConfig cfg, IReadOnlyList<ManagedChild>
             case "gateway" when a is [_, "warm"]:
                 return Background("gateway warm", ct => Tool(Path.Combine(Environment.SystemDirectory, "cmd.exe"),
                     ["/c", "openclaw agent --agent main -m \"Reply with the single word: ready\""], TimeSpan.FromMinutes(15), ct));
+            case "prompt" when a.Length == 1: return Reply(true, await PromptAsync(ct));
             case "guard" when a is [_, "check"]:
                 return Background("guard check", ct => Tool(python, [Path.Combine(cfg.Home, "ExecGuard", "guard_check.py"), "--wait", "45"], TimeSpan.FromMinutes(2), ct));
         }
         return Reply(false, "unknown command (try help)");
+    }
+
+    /// <summary>
+    /// Prompt processing progress from the status hub (wake proxy /_gate/ai): phase, tokens to process (new =
+    /// total - cached), done, pct, tok/s, eta_s. Outside the prompt phase active is false and the counts are 0.
+    /// </summary>
+    async Task<object> PromptAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(6000);
+            var ai = await http.GetFromJsonAsync<JsonElement>("/_gate/ai", cts.Token);
+            var inf = ai.GetProperty("inference");
+            return new
+            {
+                phase = inf.GetProperty("phase").GetString(),
+                elapsed_s = inf.GetProperty("elapsed_s").GetDouble(),
+                client = inf.GetProperty("client").GetString(),
+                prompt = inf.TryGetProperty("prompt", out var p) ? p : default(JsonElement?),
+            };
+        }
+        catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return new { phase = "down", error = e.GetType().Name };
+        }
+    }
+
+    /// <summary>
+    /// `subscribe prompt`: one ack line, then a PromptAsync line whenever it changes (polled every 0.5 s, plus a
+    /// keep-alive every 10 s), until the client closes the pipe. Same idea as PcHwCtl's `subscribe`.
+    /// </summary>
+    async Task SubscribePromptAsync(StreamWriter w, CancellationToken ct)
+    {
+        await w.WriteLineAsync(Reply(true, new { subscribed = "prompt" }));
+        string? prev = null;
+        var lastSent = DateTime.UtcNow;
+        while (!ct.IsCancellationRequested)
+        {
+            var line = Reply(true, await PromptAsync(ct));
+            if (line != prev || DateTime.UtcNow - lastSent > TimeSpan.FromSeconds(10))
+            {
+                await w.WriteLineAsync(line);   // throws IOException once the client is gone
+                prev = line;
+                lastSent = DateTime.UtcNow;
+            }
+            await Task.Delay(500, ct);
+        }
     }
 
     async Task<object> StatusAsync(CancellationToken ct)

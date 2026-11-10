@@ -29,6 +29,12 @@ All status endpoints bind to localhost only. Reading status endpoints never wake
 | `ai.prompt_tok_s` | float | Prompt processing tokens per second of the last request. |
 | `ai.gen_tokens` | integer | Tokens generated (live count while active, else last request total). |
 | `ai.prompt_tokens` | integer | Prompt tokens evaluated during the last request. |
+| `ai.pp_pct` | integer | Prompt processing progress of the active request, 0-100 (0 outside the prompt phase). |
+| `ai.pp_done` | integer | Prompt tokens processed so far (moves in batches of 4096). |
+| `ai.pp_new` | integer | Prompt tokens that need processing: total minus `ai.pp_cached`. |
+| `ai.pp_cached` | integer | Prompt tokens reused from the prompt cache. |
+| `ai.pp_tok_s` | float | Live prompt processing speed of the active request. |
+| `ai.pp_eta_s` | float | Seconds left in the prompt phase, `0` when unknown. |
 | `ai.tool` | string | Current or recent tool name. Empty when idle. |
 | `ai.tool_state` | string | Tool execution state (`running`, `done`, `error`), empty when no tool is shown. |
 | `ai.tool_s` | float | Tool run time in seconds while active, otherwise `0.0`. |
@@ -60,7 +66,7 @@ All status endpoints bind to localhost only. Reading status endpoints never wake
 - `uptime_s`: Seconds elapsed since the status hub initialized.
 - `alias`: Configured model alias.
 - `model`: Object with `state`, `code`, `ctx`, `unload_in_s`, `idle_s`, and `sleep_blocked`.
-- `inference`: Object with `active`, `in_flight`, `phase`, `phase_code`, `elapsed_s`, `gen_tokens`, `gen_tok_s_live`, `client`, and `last` metrics (`ok`, `status`, `total_s`, `path`, `ts`, `prompt_n`, `cached_n`, `gen_n`, `prompt_tok_s`, `gen_tok_s`, `prompt_s`, `gen_s`).
+- `inference`: Object with `active`, `in_flight`, `phase`, `phase_code`, `elapsed_s`, `gen_tokens`, `gen_tok_s_live`, `client`, `prompt` (live prompt progress: `active`, `total`, `cached`, `new`, `done`, `pct`, `tok_s`, `eta_s`), and `last` metrics (`ok`, `status`, `total_s`, `path`, `ts`, `prompt_n`, `cached_n`, `gen_n`, `prompt_tok_s`, `gen_tok_s`, `prompt_s`, `gen_s`).
 - `step`: Object with `label`, `n`, and `max`.
 - `tool`: Object with `name`, `state`, `source`, `summary`, `running_s`, `calls_total`, and `last` (`name`, `ts`). Finished tools linger for 6 seconds.
 - `guard`: Object with `state`, `code`, `trips_total`, `last_trip` record, and per-guard objects for `exec`, `content`, and `sandbox` (`state`, `code`, `detail`, `tier`, `age_s`, `source`).
@@ -153,3 +159,6 @@ The companion project [ESP32-PC-Control-System](https://github.com/lnminh1411/ES
 Its Windows helper (`ESP32-Helper.exe`, `host/pc_stats`, written in C#) polls `http://127.0.0.1:8080/_gate/ai/flat` once per second (`stats.ini` line `@source ai http://127.0.0.1:8080/_gate/ai/flat 1000`). It forwards every `ai.*` key to the board under the same name, numbers as `@s` stats and strings as `@t` text stats, and adds `ai.ok` (1 when the hub answered within 3 seconds; otherwise 0 and the other `ai.*` keys are dropped). The board's Discord "Local Agent" tab controls the stack through the helper and the [control pipe](service.md#esp32-helper), not through this feed.
 
 Because `/_gate/` requests are marked passive, polling never wakes the model or resets the idle unload timer.
+
+## Prompt progress: how it is measured
+llama-server's `/slots` gives `n_prompt_tokens_processed` and `n_prompt_tokens_cache`. Its `n_prompt_tokens` only grows batch by batch while processing, so it is not the prompt size. The hub tokenizes the request's prompt once instead: `/apply-template` renders the chat template, then `/tokenize` counts the result (~70 ms for 34k tokens). If that fails (for example, image parts), the total falls back to `/slots`' lower bound and the percentage runs high. The same data is on the Local AI Host pipe as `prompt` and `subscribe prompt`; see [service.md](service.md).

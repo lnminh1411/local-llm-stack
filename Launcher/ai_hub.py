@@ -47,6 +47,9 @@ class Hub:
         self.last = None                                 # last finished inference
         self.totals = {"requests": 0, "errors": 0, "prompt_tokens": 0, "gen_tokens": 0}
         self.live = {"decoded": 0, "t_decode0": None, "tok_s": 0.0, "processing": False, "ts": 0.0}
+        # prompt processing progress: total = the request's prompt tokenized once (/slots' n_prompt_tokens only
+        # grows batch by batch), cached + done from /slots (done moves in -ub batches of 4096)
+        self.pp = {"task": None, "total": 0, "cached": 0, "done": 0, "t0": None, "t_done": None, "tok_s": 0.0}
         self.tool = {"name": "", "state": "", "source": "", "summary": "", "since": 0.0, "end": 0.0, "count": 0}
         self.last_tool = {"name": "", "ts": 0.0}
         self.agent = {"active": False, "source": "", "channel": "", "since": 0.0}
@@ -71,7 +74,8 @@ class Hub:
         ua = (headers.get("X-Client") or headers.get("User-Agent") or "")[:40]
         with self.lock:
             self.rid += 1
-            self.reqs[self.rid] = {"t0": _now(), "path": path.split("?")[0], "stream": stream, "ua": ua, "tail": b"", "t_first": None}
+            self.reqs[self.rid] = {"t0": _now(), "path": path.split("?")[0], "stream": stream, "ua": ua, "tail": b"", "t_first": None,
+                                   "body": body}   # kept to count the prompt's tokens (prompt progress)
             self.live.update(decoded=0, t_decode0=None, tok_s=0.0)
             self.totals["requests"] += 1
             if self.tool["state"] == "running":      # a new model call means the previous tool call has returned (some hosts never report the end)
@@ -199,6 +203,28 @@ class Hub:
             now = _now()
             with self.lock:
                 self.live["processing"] = bool(s.get("is_processing"))
+                new_task = False
+                if s.get("is_processing") and "n_prompt_tokens" in s:
+                    task, done = s.get("id_task"), int(s.get("n_prompt_tokens_processed") or 0)
+                    if task != self.pp["task"]:
+                        # time from the request's arrival: the first poll can land after the first batch has started
+                        t0 = min((r["t0"] for r in self.reqs.values()), default=now)
+                        self.pp = {"task": task, "total": 0, "cached": 0, "done": 0, "t0": t0, "t_done": None, "tok_s": 0.0}
+                        new_task = True
+                    self.pp["cached"] = int(s.get("n_prompt_tokens_cache") or 0)
+                    if done != self.pp["done"]:
+                        self.pp.update(done=done, t_done=now)
+                        if now - self.pp["t0"] > 0.5:   # rate at the last batch boundary, so it does not sag between batches
+                            self.pp["tok_s"] = round(done / (now - self.pp["t0"]), 1)
+                    # lower bound until the real total is known
+                    self.pp["total"] = max(self.pp["total"], int(s.get("n_prompt_tokens") or 0))
+                body = next(iter(self.reqs.values()))["body"] if new_task and self.reqs else None
+            if body:
+                n = self._count_prompt(body)
+                if n:
+                    with self.lock:
+                        if self.pp["task"] == task:
+                            self.pp["total"] = max(self.pp["total"], n)
                 if decoded > 0:
                     if self.live["t_decode0"] is None or decoded < self.live["decoded"]:
                         self.live.update(t_decode0=now, decoded=decoded, base=decoded)
@@ -212,6 +238,29 @@ class Hub:
                     self.live.update(decoded=0, t_decode0=None, tok_s=0.0)
                 self.live["ts"] = now
             self._bump()
+
+    def _count_prompt(self, body):
+        """Tokens of a chat/completions request's prompt, via llama-server /apply-template + /tokenize (~70 ms
+        for 34k tokens). None when it cannot tell (bad JSON, image parts the template rejects, ...)."""
+        try:
+            req = json.loads(body)
+            if "messages" in req:
+                text = self._post("/apply-template", {"messages": req["messages"]})["prompt"]
+            elif isinstance(req.get("prompt"), str):
+                text = req["prompt"]
+            else:
+                return None
+            return len(self._post("/tokenize", {"content": text, "add_special": True})["tokens"])
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _post(self, path, obj):
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        try:
+            c.request("POST", path, json.dumps(obj), {"Content-Type": "application/json"})
+            return json.loads(c.getresponse().read())
+        finally:
+            c.close()
 
     def _poll_gpu(self):
         while True:
@@ -232,6 +281,18 @@ class Hub:
             self.changed.notify_all()
 
     # ------------------------------------------------------------------ views
+    def _prompt_view(self, phase):
+        """Prompt processing progress of the current request (zeros outside the prompt phase).
+        new = tokens that need processing (total - cached); pct and eta are over those."""
+        p = self.pp
+        if phase != "prompt" or not p["total"]:
+            return {"active": False, "total": 0, "cached": 0, "new": 0, "done": 0, "pct": 0, "tok_s": 0.0, "eta_s": None}
+        new = max(p["total"] - p["cached"], 0)
+        done = min(p["done"], new) if new else 0
+        eta = round((new - done) / p["tok_s"], 1) if p["tok_s"] and new > done else None
+        return {"active": True, "total": p["total"], "cached": p["cached"], "new": new, "done": done,
+                "pct": int(100 * done / new) if new else 100, "tok_s": p["tok_s"], "eta_s": eta}
+
     def _guard_view(self, now):
         order = {"clear": 0, "approved": 0, "denied": 1, "timed_out": 2, "checking": 3, "tripped": 4, "waiting_approval": 5}
         view = {}
@@ -281,6 +342,7 @@ class Hub:
                 "gen_tok_s_live": self.live["tok_s"] if busy and self.live["decoded"] > 0 else 0.0,
                 "client": first["ua"] if first else "",
                 "last": self.last,
+                "prompt": self._prompt_view(phase),
             }
             step = {"label": "", "n": 0, "max": 0}
             if job_live:
@@ -314,6 +376,8 @@ class Hub:
             ("ai.model", m["code"]), ("ai.model_name", m["state"]), ("ai.phase", i["phase_code"]), ("ai.phase_name", i["phase"]),
             ("ai.active", int(i["active"])), ("ai.elapsed_s", done), ("ai.gen_tok_s", gen), ("ai.prompt_tok_s", last.get("prompt_tok_s") or 0),
             ("ai.gen_tokens", i["gen_tokens"] if i["active"] else (last.get("gen_n") or 0)), ("ai.prompt_tokens", last.get("prompt_n") or 0),
+            ("ai.pp_pct", i["prompt"]["pct"]), ("ai.pp_done", i["prompt"]["done"]), ("ai.pp_new", i["prompt"]["new"]),
+            ("ai.pp_cached", i["prompt"]["cached"]), ("ai.pp_tok_s", i["prompt"]["tok_s"]), ("ai.pp_eta_s", i["prompt"]["eta_s"] or 0),
             ("ai.tool", t["name"]), ("ai.tool_state", t["state"]), ("ai.tool_s", t["running_s"]),
             ("ai.step", st["n"]), ("ai.step_max", st["max"]), ("ai.job", job.get("id") or ""), ("ai.job_state", job.get("state") or ""),
             ("ai.guard", g["code"]), ("ai.guard_name", g["state"]), ("ai.guard_detail", (g.get("exec", {}).get("detail") if g["exec"]["state"] != "clear" else

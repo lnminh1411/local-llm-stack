@@ -169,6 +169,8 @@ Response structures:
 | `start <name>` | Synchronous | Clears `stopped` flag and starts child immediately. Name must be single child; `all` returns an error. | `{"action":"start","targets":["<name>"]}` |
 | `gateway warm` | Background | Executes `cmd.exe /c openclaw agent --agent main -m "Reply with the single word: ready"` with a 15 minute timeout. | `{"started":"gateway warm"}` |
 | `guard check` | Background | Executes `python ExecGuard\guard_check.py --wait 45` with a 2 minute timeout. | `{"started":"guard check"}` |
+| `prompt` | Immediate | Prompt processing progress from the status hub: `phase`, `elapsed_s`, `client`, `prompt` {`active`, `total`, `cached`, `new`, `done`, `pct`, `tok_s`, `eta_s`}. | `{"phase":"prompt","prompt":{"pct":72,...}}` |
+| `subscribe prompt` | Stream | One ack line `{"subscribed":"prompt"}`, then a `prompt` line whenever the value changes (checked every 0.5 s, keep-alive every 10 s) until the client closes the pipe. The connection takes no further commands. | one JSON line per change |
 
 Background commands return `{"ok":true,"data":{"started":"<action>"}}` immediately. Only one background action runs at a time; if an action is in progress, background commands return `{"ok":false,"error":"busy with another action"}`. The outcome of the background action updates the `last` property in `status`: `action`, `result` (`running`, `ok` or `err <message>`) and `at` (`HH:mm:ss`).
 
